@@ -1,0 +1,139 @@
+#!/bin/bash
+# Sends notification to Apple Watch/iPhone via Pushover
+# Usage: notify-watch [options] "message" [title]
+#
+# Options:
+#   -s, --silent     Lowest priority - badge only, no notification
+#   -q, --quiet      Low priority - no sound/vibration
+#   -n, --normal     Normal priority - respects device settings
+#   -h, --high       High priority - bypasses quiet hours (DEFAULT)
+#   -e, --emergency  Emergency - repeats until acknowledged
+#
+# Examples:
+#   notify-watch "Build complete!"
+#   notify-watch -q "FYI: logs rotated"
+#   notify-watch -e "SERVER DOWN" "Alert"
+
+# Load credentials from config file if not in environment
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/notify-watch/credentials"
+if [ -z "$PUSHOVER_USER" ] || [ -z "$PUSHOVER_TOKEN" ]; then
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+    fi
+fi
+
+# Validate credentials
+if [ -z "$PUSHOVER_USER" ] || [ -z "$PUSHOVER_TOKEN" ]; then
+    echo "Error: Pushover credentials not configured"
+    echo ""
+    echo "Set up credentials in one of these ways:"
+    echo ""
+    echo "  1. Create $CONFIG_FILE with:"
+    echo "     PUSHOVER_USER=\"your-user-key\""
+    echo "     PUSHOVER_TOKEN=\"your-api-token\""
+    echo ""
+    echo "  2. Export environment variables:"
+    echo "     export PUSHOVER_USER=\"your-user-key\""
+    echo "     export PUSHOVER_TOKEN=\"your-api-token\""
+    echo ""
+    echo "Get your keys at: https://pushover.net"
+    exit 1
+fi
+
+# Default to high priority
+PRIORITY=1
+PRIORITY_NAME="high"
+
+# Parse options
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -s|--silent)
+            PRIORITY=-2
+            PRIORITY_NAME="silent"
+            shift
+            ;;
+        -q|--quiet)
+            PRIORITY=-1
+            PRIORITY_NAME="quiet"
+            shift
+            ;;
+        -n|--normal)
+            PRIORITY=0
+            PRIORITY_NAME="normal"
+            shift
+            ;;
+        -h|--high)
+            PRIORITY=1
+            PRIORITY_NAME="high"
+            shift
+            ;;
+        -e|--emergency)
+            PRIORITY=2
+            PRIORITY_NAME="emergency"
+            shift
+            ;;
+        --help)
+            echo "Usage: notify-watch [options] \"message\" [title]"
+            echo ""
+            echo "Send push notifications to your phone/watch via Pushover."
+            echo ""
+            echo "Options:"
+            echo "  -s, --silent     Badge only, no notification shown"
+            echo "  -q, --quiet      No sound/vibration, appears in notification center"
+            echo "  -n, --normal     Sound/vibration per device settings"
+            echo "  -h, --high       Bypasses quiet hours, always alerts (DEFAULT)"
+            echo "  -e, --emergency  Repeats every 30s until acknowledged"
+            echo ""
+            echo "Examples:"
+            echo "  notify-watch \"Build complete!\""
+            echo "  notify-watch -q \"FYI: logs rotated\""
+            echo "  notify-watch -e \"SERVER DOWN\" \"Alert\""
+            echo ""
+            echo "Setup:"
+            echo "  Create ~/.config/notify-watch/credentials with:"
+            echo "    PUSHOVER_USER=\"your-user-key\""
+            echo "    PUSHOVER_TOKEN=\"your-api-token\""
+            echo ""
+            echo "  Get your keys at: https://pushover.net"
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            echo "Use --help for usage"
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+MESSAGE="${1:-Task complete}"
+TITLE="${2:-Claude}"
+
+# Build curl command
+CURL_ARGS=(
+    -s
+    -F "token=$PUSHOVER_TOKEN"
+    -F "user=$PUSHOVER_USER"
+    -F "title=$TITLE"
+    -F "message=$MESSAGE"
+    -F "priority=$PRIORITY"
+)
+
+# Emergency priority requires retry and expire parameters
+if [[ $PRIORITY -eq 2 ]]; then
+    CURL_ARGS+=(-F "retry=30")    # Retry every 30 seconds
+    CURL_ARGS+=(-F "expire=300")  # Stop after 5 minutes if not acknowledged
+fi
+
+RESPONSE=$(curl "${CURL_ARGS[@]}" https://api.pushover.net/1/messages.json)
+
+# Check if successful
+if echo "$RESPONSE" | grep -q '"status":1'; then
+    echo "✓ Sent ($PRIORITY_NAME): $MESSAGE"
+else
+    echo "✗ Failed to send notification"
+    echo "$RESPONSE"
+    exit 1
+fi

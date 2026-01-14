@@ -34,6 +34,21 @@ Interactive demo of everything [gum](https://github.com/charmbracelet/gum) can d
 gum-showcase            # Prepare to be obsessed
 ```
 
+### notify-watch
+Send push notifications to your phone/Apple Watch via [Pushover](https://pushover.net).
+
+```bash
+notify-watch "Build complete!"           # High priority (default)
+notify-watch -q "FYI: logs rotated"      # Quiet - no sound
+notify-watch -e "SERVER DOWN" "Alert"    # Emergency - repeats until acknowledged
+```
+
+**Setup:** Create `~/.config/notify-watch/credentials`:
+```bash
+PUSHOVER_USER="your-user-key"
+PUSHOVER_TOKEN="your-api-token"
+```
+
 ## Installation
 
 ### One-liner (recommended)

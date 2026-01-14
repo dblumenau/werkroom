@@ -40,7 +40,7 @@ detect_package_manager() {
 }
 
 # Available tools
-ALL_TOOLS=("slay" "hunty" "gum-showcase")
+ALL_TOOLS=("slay" "hunty" "gum-showcase" "notify-watch")
 
 # Parse arguments - default to just slay
 if [ $# -eq 0 ]; then

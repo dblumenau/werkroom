@@ -25,7 +25,7 @@ if [ ! -d "$BIN_DIR" ]; then
 fi
 
 # Tools to install
-TOOLS=("slay" "hunty" "gum-showcase")
+TOOLS=("slay" "hunty" "gum-showcase" "notify-watch")
 
 for tool in "${TOOLS[@]}"; do
     src="$SCRIPT_DIR/$tool"
