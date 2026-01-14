@@ -270,7 +270,7 @@ select_project() {
                 # Try to discover URLs via plugin, then check cache
                 local discovered_urls discovered_url cached_url url_count
                 discovered_urls=$(discover_urls "$selected_customer")
-                url_count=$(echo "$discovered_urls" | grep -c . 2>/dev/null || echo 0)
+                url_count=$(echo "$discovered_urls" | grep -c . 2>/dev/null || true)
                 cached_url=$(get_cached_url "$selected_customer")
 
                 # Multiple discovered URLs - show picker
