@@ -77,15 +77,25 @@ if [ ${#missing[@]} -gt 0 ]; then
             echo -e "  ${B}brew install ${missing[*]}${R}"
             ;;
         apt)
-            # Special case: fd is fd-find on Debian/Ubuntu
+            # Special case: gum requires Charm's repo, fd is fd-find
             apt_deps=()
+            has_gum=false
             for dep in "${missing[@]}"; do
-                if [ "$dep" = "fd" ]; then
+                if [ "$dep" = "gum" ]; then
+                    has_gum=true
+                elif [ "$dep" = "fd" ]; then
                     apt_deps+=("fd-find")
                 else
                     apt_deps+=("$dep")
                 fi
             done
+            if [ "$has_gum" = true ]; then
+                echo -e "  ${B}# Add Charm's repo for gum${R}"
+                echo -e "  ${B}sudo mkdir -p /etc/apt/keyrings${R}"
+                echo -e "  ${B}curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg${R}"
+                echo -e "  ${B}echo \"deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *\" | sudo tee /etc/apt/sources.list.d/charm.list${R}"
+                apt_deps+=("gum")
+            fi
             echo -e "  ${B}sudo apt update && sudo apt install -y ${apt_deps[*]}${R}"
             ;;
         dnf|yum)
@@ -106,14 +116,21 @@ if [ ${#missing[@]} -gt 0 ]; then
         *)
             # Unknown package manager - show all options
             echo -e "  ${B}brew install ${missing[*]}${R}  (macOS)"
-
+            echo ""
+            # Check if gum is needed - requires special setup on Linux
+            if [[ " ${missing[*]} " =~ " gum " ]]; then
+                echo -e "  ${B}# For gum on Debian/Ubuntu, first add Charm's repo:${R}"
+                echo -e "  ${B}sudo mkdir -p /etc/apt/keyrings${R}"
+                echo -e "  ${B}curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg${R}"
+                echo -e "  ${B}echo \"deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *\" | sudo tee /etc/apt/sources.list.d/charm.list${R}"
+                echo ""
+            fi
             # Build apt command with fd-find special case
             apt_deps=()
             for dep in "${missing[@]}"; do
                 [ "$dep" = "fd" ] && apt_deps+=("fd-find") || apt_deps+=("$dep")
             done
-            echo -e "  ${B}sudo apt install ${apt_deps[*]}${R}  (Debian/Ubuntu)"
-            echo -e "  ${B}sudo dnf install ${apt_deps[*]}${R}  (Fedora)"
+            echo -e "  ${B}sudo apt update && sudo apt install ${apt_deps[*]}${R}  (Debian/Ubuntu)"
             echo -e "  ${B}sudo pacman -S ${missing[*]}${R}  (Arch)"
             ;;
     esac
