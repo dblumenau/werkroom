@@ -95,11 +95,38 @@ echo ""
 
 # Check if ~/bin is in PATH
 if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
-    echo -e "${YELLOW}~/bin is not in your PATH.${R} Add this to your ~/.zshrc:"
+    # Detect shell and suggest appropriate config file
+    local shell_config
+    local shell_name
+    if [ -n "$ZSH_VERSION" ]; then
+        shell_config="~/.zshrc"
+        shell_name="zsh"
+    elif [ -n "$BASH_VERSION" ]; then
+        shell_config="~/.bashrc"
+        shell_name="bash"
+    else
+        # Fallback: check SHELL env var
+        case "$SHELL" in
+            */zsh)
+                shell_config="~/.zshrc"
+                shell_name="zsh"
+                ;;
+            */bash)
+                shell_config="~/.bashrc"
+                shell_name="bash"
+                ;;
+            *)
+                shell_config="~/.profile"
+                shell_name="your shell"
+                ;;
+        esac
+    fi
+
+    echo -e "${YELLOW}~/bin is not in your PATH.${R} Add this to your $shell_config:"
     echo ""
     echo -e '  export PATH="$HOME/bin:$PATH"'
     echo ""
-    echo "Then run: source ~/.zshrc"
+    echo "Then run: source $shell_config"
 else
     echo "Run ${B}slay${R} to get started."
 fi

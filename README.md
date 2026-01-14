@@ -62,11 +62,17 @@ cd ~/projects/werkroom && ./link.sh
 
 ### PATH setup
 
-If `~/bin` isn't already in your PATH, add this to your `~/.zshrc`:
+If `~/bin` isn't already in your PATH, add this to your shell config:
 
 ```bash
-export PATH="$HOME/bin:$PATH"
+# For zsh (macOS default)
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
+
+# For bash (Linux/WSL default)
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc
 ```
+
+The installer will detect your shell and tell you which one to use.
 
 ### Updating
 
