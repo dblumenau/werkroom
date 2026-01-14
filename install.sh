@@ -19,6 +19,26 @@ REPO_URL="https://github.com/dblumenau/werkroom.git"
 INSTALL_DIR="$HOME/.werkroom"
 BIN_DIR="$HOME/bin"
 
+# Detect package manager
+detect_package_manager() {
+    # Check native Linux package managers first
+    # (brew can be installed on Linux but is uncommon)
+    if command -v apt-get &> /dev/null; then
+        echo "apt"
+    elif command -v dnf &> /dev/null; then
+        echo "dnf"
+    elif command -v yum &> /dev/null; then
+        echo "yum"
+    elif command -v pacman &> /dev/null; then
+        echo "pacman"
+    elif command -v brew &> /dev/null; then
+        # macOS or Homebrew on Linux
+        echo "brew"
+    else
+        echo "unknown"
+    fi
+}
+
 # Available tools
 ALL_TOOLS=("slay" "hunty" "gum-showcase")
 
@@ -50,7 +70,54 @@ if [ ${#missing[@]} -gt 0 ]; then
     echo -e "${YELLOW}Missing dependencies: ${missing[*]}${R}"
     echo ""
     echo "Install them first:"
-    echo -e "  ${B}brew install ${missing[*]}${R}"
+
+    local pkg_mgr=$(detect_package_manager)
+    case "$pkg_mgr" in
+        brew)
+            echo -e "  ${B}brew install ${missing[*]}${R}"
+            ;;
+        apt)
+            # Special case: fd is fd-find on Debian/Ubuntu
+            local apt_deps=()
+            for dep in "${missing[@]}"; do
+                if [ "$dep" = "fd" ]; then
+                    apt_deps+=("fd-find")
+                else
+                    apt_deps+=("$dep")
+                fi
+            done
+            echo -e "  ${B}sudo apt update && sudo apt install -y ${apt_deps[*]}${R}"
+            ;;
+        dnf|yum)
+            # fd is fd-find on RHEL/Fedora too
+            local rpm_deps=()
+            for dep in "${missing[@]}"; do
+                if [ "$dep" = "fd" ]; then
+                    rpm_deps+=("fd-find")
+                else
+                    rpm_deps+=("$dep")
+                fi
+            done
+            echo -e "  ${B}sudo $pkg_mgr install -y ${rpm_deps[*]}${R}"
+            ;;
+        pacman)
+            echo -e "  ${B}sudo pacman -S ${missing[*]}${R}"
+            ;;
+        *)
+            # Unknown package manager - show all options
+            echo -e "  ${B}brew install ${missing[*]}${R}  (macOS)"
+
+            # Build apt command with fd-find special case
+            local apt_deps=()
+            for dep in "${missing[@]}"; do
+                [ "$dep" = "fd" ] && apt_deps+=("fd-find") || apt_deps+=("$dep")
+            done
+            echo -e "  ${B}sudo apt install ${apt_deps[*]}${R}  (Debian/Ubuntu)"
+            echo -e "  ${B}sudo dnf install ${apt_deps[*]}${R}  (Fedora)"
+            echo -e "  ${B}sudo pacman -S ${missing[*]}${R}  (Arch)"
+            ;;
+    esac
+
     echo ""
     exit 1
 fi
