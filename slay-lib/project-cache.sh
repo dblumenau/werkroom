@@ -26,8 +26,9 @@ build_project_cache() {
     mkdir -p "$(dirname "$CACHE_FILE")"
 
     # Find all .git directories and extract project paths
-    fd_cmd -t d "^\.git$" "$PROJECTS_DIR" --hidden -E backup_projects 2>/dev/null | \
-        sed 's|/\.git/?$||' | \
+    # Note: --no-ignore required because fd ignores .git by default
+    fd_cmd -t d "^\.git$" "$PROJECTS_DIR" --hidden --no-ignore -E backup_projects 2>/dev/null | \
+        sed -E 's|/\.git/?$||' | \
         sort -u > "$CACHE_FILE"
 }
 
@@ -35,7 +36,7 @@ get_projects() {
     # Use cache if exists and not forcing refresh
     if [ "$REFRESH_CACHE" = true ] || [ ! -f "$CACHE_FILE" ]; then
         if [ "$HAS_GUM" = true ]; then
-            gum spin --spinner "$(random_spinner)" --spinner.foreground="212" --title "Scanning projects..." -- bash -c "$(declare -f build_project_cache); PROJECTS_DIR=\"$PROJECTS_DIR\"; CACHE_FILE=\"$CACHE_FILE\"; build_project_cache"
+            gum spin --spinner "$(random_spinner)" --spinner.foreground="212" --title "Scanning projects..." -- bash -c "$(declare -f fd_cmd build_project_cache); PROJECTS_DIR=\"$PROJECTS_DIR\"; CACHE_FILE=\"$CACHE_FILE\"; build_project_cache"
         else
             echo "Scanning projects..."
             build_project_cache
@@ -68,7 +69,7 @@ get_repos_for_group() {
 get_git_repos_for_customer() {
     local customer="$1"
     # Find all git repos under customer folder
-    fd_cmd -t d "^\.git$" "$PROJECTS_DIR/$customer" --hidden 2>/dev/null | \
+    fd_cmd -t d "^\.git$" "$PROJECTS_DIR/$customer" --hidden --no-ignore 2>/dev/null | \
         sed -E 's|/\.git/?$||' | \
         sed "s|$PROJECTS_DIR/$customer/||" | \
         sort
