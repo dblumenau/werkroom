@@ -1,0 +1,1067 @@
+#!/bin/bash
+
+# hunty - Search through Claude Code conversation transcripts
+# Usage: hunty [-d days] [-p project] [search_pattern]
+# Version: 1.0.0
+
+VERSION="1.0.0"
+
+# ═══════════════════════════════════════════════════════════════
+# RESOLVE SCRIPT LOCATION & SOURCE SLAY COLORS
+# ═══════════════════════════════════════════════════════════════
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    [[ "$SCRIPT_PATH" != /* ]] && SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+# Source slay colors if available
+if [ -f "$SCRIPT_DIR/slay-lib/colors.sh" ]; then
+    source "$SCRIPT_DIR/slay-lib/colors.sh"
+else
+    # Fallback colors
+    R='\033[0m'
+    B='\033[1m'
+    DIM='\033[2m'
+    PINK='\033[95m'
+    CYAN='\033[96m'
+    YELLOW='\033[93m'
+    GREEN='\033[92m'
+    RED='\033[91m'
+    WHITE='\033[97m'
+    GRAY='\033[90m'
+    COLOR_PINK="212"
+    COLOR_SUCCESS="82"
+    COLOR_WARNING="214"
+    COLOR_ERROR="196"
+    COLOR_INFO="51"
+    COLOR_DIM="240"
+    COLOR_WHITE="255"
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# CONFIGURATION
+# ═══════════════════════════════════════════════════════════════
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+PROJECTS_DIR="$CLAUDE_DIR/projects"
+DAYS=1
+PROJECT_FILTER=""
+CONTEXT_LINES=0
+SEARCH_PATTERN=""
+INTERACTIVE_MODE=false
+
+# Cache directory for persisting search results across sessions
+HUNTY_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/hunty"
+HUNTY_RESULTS_CACHE="$HUNTY_CACHE_DIR/last-results.tsv"
+HUNTY_SEARCH_META="$HUNTY_CACHE_DIR/last-search-meta"
+
+# Check for required tools
+check_deps() {
+    local missing=()
+    command -v fd &>/dev/null || missing+=("fd")
+    command -v rg &>/dev/null || missing+=("rg")
+    command -v jq &>/dev/null || missing+=("jq")
+    command -v gum &>/dev/null || missing+=("gum")
+    command -v fzf &>/dev/null || missing+=("fzf")
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo -e "${RED}Missing dependencies: ${missing[*]}${R}"
+        echo -e "${DIM}Install with: brew install ${missing[*]}${R}"
+        exit 1
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════
+# SPINNERS & SEARCH MESSAGES
+# ═══════════════════════════════════════════════════════════════
+SPINNERS=("line" "dot" "minidot" "jump" "pulse" "points" "globe" "moon" "monkey" "meter" "hamburger")
+random_spinner() {
+    echo "${SPINNERS[$RANDOM % ${#SPINNERS[@]}]}"
+}
+
+SEARCH_MESSAGES=(
+    # The hunt begins
+    "Digging through the archives, bestie..."
+    "Where did I say that again? Let me find the receipts..."
+    "Searching the multiverse of conversations..."
+    "She's hunting. She's gathering. She's iconic."
+    "Looking for that ONE conversation like 🔍👀"
+    "The search is searching..."
+    "Going through the group chat history rn..."
+    "Manifesting those search results into existence..."
+    "Reading the transcripts like they're hot gossip..."
+    "Hunting through the conversation jungle..."
+    # Claude-themed
+    "Claude remembers everything. Let's find it."
+    "Asking Claude where Claude said that thing..."
+    "The AI is searching for what the AI said. Meta."
+    "Claude Code archeology in progress..."
+    "Mining the Claude conversation gold..."
+    "Scanning through all the Claude tea ☕"
+    "What did Claude say? Claude is checking..."
+    "The context window remembers all, sweetie."
+    "Tokens in, receipts out."
+    "Neural networks? More like neural DETECTworks."
+    # Tech sass
+    "grep but make it ✨fashion✨"
+    "Binary search? More like SLAY-nary search."
+    "O(n) complexity but make it cute..."
+    "Parsing JSONs like they owe me money..."
+    "The regex is regexing..."
+    "ripgrep goes brrrrr..."
+    "fd and rg are having their moment..."
+    "Full text search? Full SLAY search."
+    "Indexing these vibes..."
+    "The algorithm is algorithmizing..."
+    # Drama
+    "Not me reading through my own conversations like tea..."
+    "The conversations are conversing back..."
+    "She's giving... search engine energy."
+    "Looking through receipts like I'm the IRS..."
+    "Hunting through messages like they're on sale..."
+    "This is giving 'where did I put my keys' but for code..."
+    "Reading transcripts like they're the Bible..."
+    "Checking the archives like I'm a historian..."
+    "Digging through history like an archaeologist..."
+    "The past is being excavated, queen..."
+    # Self-aware
+    "One does not simply find a needle in a haystack... unless?"
+    "Finding patterns in chaos since 2024..."
+    "Memory? I don't know her. That's why we have logs."
+    "Plot twist: the conversation was inside us all along..."
+    "Searching for answers in a sea of JSON..."
+    "Looking for that conversation like it's my will to live..."
+    "The search party has been dispatched..."
+    "Scanning the simulation for your query..."
+    "Checking if past-Claude knew what future-you needed..."
+    "The treasure hunt begins..."
+    # More chaos
+    "Hold my tokens, I'm going in..."
+    "Every conversation tells a story. Let's find yours."
+    "Not all who wander are lost. But I'm definitely searching."
+    "Sherlock Holmes but make it silicon..."
+    "Detective mode: ACTIVATED 🔍"
+    "CSI: Claude Search Investigation..."
+    "The files are IN the computer..."
+    "Reading the room... and all the rooms before it..."
+    "Ctrl+F but with personality..."
+    "Command+F? More like Command+SLAY."
+)
+random_search_message() {
+    echo "${SEARCH_MESSAGES[$RANDOM % ${#SEARCH_MESSAGES[@]}]}"
+}
+
+# Kardashian-style exit messages when no pattern entered
+EXIT_MESSAGES=(
+    "Okay so you're just gonna leave without searching? The audacity."
+    "Not even gonna TRY? This is very un-Kris Jenner of you."
+    "You came all this way to give me NOTHING? Iconic, honestly."
+    "The search bar is right there, sweetie. It's not gonna bite."
+    "Leaving without searching? That's giving quitter energy."
+    "Kim would never leave a search bar empty. Just saying."
+    "So we're not doing this today? Cool cool cool cool."
+    "You're really gonna ghost the search like that? Wow."
+    "BIBLE - you need to at least TRY to find what you're looking for."
+    "This is very 'I don't wanna be here' of you. Valid, but still."
+    "The conversations aren't gonna search themselves, babe."
+    "Okay so we gathered here today for WHAT exactly?"
+    "Not the dramatic exit without even a search query..."
+    "You're excused, I guess. But like... suspicious behavior."
+    "Leaving empty-handed? The universe had plans for you today."
+)
+random_exit_message() {
+    echo "${EXIT_MESSAGES[$RANDOM % ${#EXIT_MESSAGES[@]}]}"
+}
+
+# Animated spinner with rotating messages (runs in background)
+# Usage: start_message_spinner; do_work; stop_message_spinner
+SPINNER_PID=""
+SPINNER_FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+
+start_message_spinner() {
+    (
+        local frame_idx=0
+        local msg_timer=0
+        local current_msg
+        current_msg=$(random_search_message)
+
+        while true; do
+            # Rotate message every 5 seconds (50 iterations at 0.1s each)
+            if [ $msg_timer -ge 50 ]; then
+                current_msg=$(random_search_message)
+                msg_timer=0
+            fi
+
+            # Show spinner frame and message
+            printf "\r\033[K\033[95m%s\033[0m \033[95m\033[3m%s\033[0m" "${SPINNER_FRAMES[$frame_idx]}" "$current_msg"
+
+            frame_idx=$(( (frame_idx + 1) % ${#SPINNER_FRAMES[@]} ))
+            msg_timer=$((msg_timer + 1))
+            sleep 0.1
+        done
+    ) &
+    SPINNER_PID=$!
+}
+
+stop_message_spinner() {
+    if [ -n "$SPINNER_PID" ]; then
+        kill "$SPINNER_PID" 2>/dev/null
+        wait "$SPINNER_PID" 2>/dev/null
+        printf "\r\033[K"  # Clear the spinner line
+        SPINNER_PID=""
+    fi
+}
+
+# Ensure spinner stops on exit/interrupt
+trap 'stop_message_spinner' EXIT INT TERM
+
+# ═══════════════════════════════════════════════════════════════
+# HELP
+# ═══════════════════════════════════════════════════════════════
+show_help() {
+    echo ""
+    gum style --foreground 212 --bold --align center "🔍 HUNTY 🔍"
+    gum style --foreground 212 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    gum style --foreground 255 "Search through your Claude Code conversations"
+    echo ""
+
+    gum style --foreground 51 --bold "USAGE"
+    echo "  $(gum style --foreground 255 "hunty")                              $(gum style --foreground 240 --italic "(interactive mode)")"
+    echo "  $(gum style --foreground 255 "hunty") $(gum style --foreground 240 "[options]") $(gum style --foreground 82 "<pattern>")"
+    echo ""
+
+    gum style --foreground 51 --bold "OPTIONS"
+    echo "  $(gum style --foreground 33 -- "-d"), $(gum style --foreground 33 -- "--days") $(gum style --foreground 255 -- "<n>")        Search files from last N days $(gum style --foreground 240 --italic -- "(default: 1)")"
+    echo "  $(gum style --foreground 33 -- "-p"), $(gum style --foreground 33 -- "--project") $(gum style --foreground 255 -- "<pat>")   Filter by project path pattern"
+    echo "  $(gum style --foreground 33 -- "-C") $(gum style --foreground 255 -- "<n>")                   Show N lines of context around matches"
+    echo "  $(gum style --foreground 33 -- "-a"), $(gum style --foreground 33 -- "--all")                 Search all time $(gum style --foreground 240 --italic -- "(no time filter)")"
+    echo "  $(gum style --foreground 33 -- "-h"), $(gum style --foreground 33 -- "--help")                Show this help"
+    echo ""
+
+    gum style --foreground 51 --bold "EXAMPLES"
+    gum style --foreground 240 --italic "  # Search for 'typescript' in today's conversations"
+    echo "  $(gum style --foreground 255 "hunty") $(gum style --foreground 82 "typescript")"
+    echo ""
+    gum style --foreground 240 --italic "  # Search last 7 days"
+    echo "  $(gum style --foreground 255 "hunty") $(gum style --foreground 33 -- "-d 7") $(gum style --foreground 82 "api endpoint")"
+    echo ""
+    gum style --foreground 240 --italic "  # Search in a specific project"
+    echo "  $(gum style --foreground 255 "hunty") $(gum style --foreground 33 -- "-p dotfiles") $(gum style --foreground 82 "slay")"
+    echo ""
+    gum style --foreground 240 --italic "  # Interactive mode - browse all recent conversations"
+    echo "  $(gum style --foreground 255 "hunty")"
+    echo ""
+
+    gum style --foreground 51 --bold "TRANSCRIPT LOCATION"
+    echo "  $(gum style --foreground 240 "$PROJECTS_DIR")"
+    echo ""
+
+    gum style --foreground 212 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    gum style --foreground 240 --italic "\"Where did I say that? Oh honey, let me find the receipts.\""
+    echo ""
+    exit 0
+}
+
+# ═══════════════════════════════════════════════════════════════
+# ARGUMENT PARSING
+# ═══════════════════════════════════════════════════════════════
+SEARCH_ALL=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -d|--days)
+            DAYS="$2"
+            shift 2
+            ;;
+        -p|--project)
+            PROJECT_FILTER="$2"
+            shift 2
+            ;;
+        -C)
+            CONTEXT_LINES="$2"
+            shift 2
+            ;;
+        -a|--all)
+            SEARCH_ALL=true
+            shift
+            ;;
+        -h|--help)
+            check_deps
+            show_help
+            ;;
+        -v|--version)
+            echo "hunty v$VERSION"
+            exit 0
+            ;;
+        -*)
+            echo "Unknown flag: $1 (try -h for help)"
+            exit 1
+            ;;
+        *)
+            SEARCH_PATTERN="$1"
+            shift
+            ;;
+    esac
+done
+
+check_deps
+
+# ═══════════════════════════════════════════════════════════════
+# UTILITY FUNCTIONS
+# ═══════════════════════════════════════════════════════════════
+
+# Decode project path from encoded directory name
+# Claude encodes paths by replacing / with - but directory names may contain dashes
+# We validate against the filesystem to find the correct path
+decode_project_path() {
+    local encoded="$1"
+
+    # Handle leading dash = root /
+    if [[ "$encoded" == -* ]]; then
+        encoded="${encoded#-}"
+        local base="/"
+    else
+        local base=""
+    fi
+
+    # Handle special cases
+    [[ -z "$encoded" ]] && { echo "$base"; return; }
+    [[ "$encoded" == "subagents" ]] && { echo "subagents"; return; }
+
+    # Split by dash and reconstruct path by checking filesystem
+    local IFS='-'
+    local parts
+    read -ra parts <<< "$encoded"
+
+    local result="$base"
+    local current=""
+
+    for part in "${parts[@]}"; do
+        if [ -z "$current" ]; then
+            current="$part"
+        else
+            # Check if extending current with -part gives a valid directory
+            # Prefer longer directory names over shorter ones
+            local extended="${current}-${part}"
+            if [ -d "${result}${extended}" ]; then
+                # Extended path exists - keep the dash as part of directory name
+                current="$extended"
+            elif [ -d "${result}${current}" ]; then
+                # Extended doesn't exist but current does - treat dash as separator
+                result="${result}${current}/"
+                current="$part"
+            else
+                # Neither exists - keep accumulating (path may not exist on disk)
+                current="${current}-${part}"
+            fi
+        fi
+    done
+
+    # Add final segment
+    result="${result}${current}"
+
+    echo "$result"
+}
+
+# Get project name (last component of decoded path)
+get_project_name() {
+    local encoded="$1"
+    local decoded
+    decoded=$(decode_project_path "$encoded")
+    basename "$decoded"
+}
+
+# ═══════════════════════════════════════════════════════════════
+# CACHE FUNCTIONS
+# ═══════════════════════════════════════════════════════════════
+
+# Save search results to cache before exec-ing to claude
+# This allows restoring results when user returns to hunty
+save_results_to_cache() {
+    mkdir -p "$HUNTY_CACHE_DIR"
+    # Write formatted_results array (tab-delimited lines)
+    printf '%s\n' "${formatted_results[@]}" > "$HUNTY_RESULTS_CACHE"
+    # Write metadata: pattern, days/all flag, timestamp
+    local time_mode="$DAYS"
+    [ "$SEARCH_ALL" = true ] && time_mode="all"
+    printf '%s\n%s\n%s\n' "$SEARCH_PATTERN" "$time_mode" "$(date +%s)" > "$HUNTY_SEARCH_META"
+}
+
+# Clear the results cache (on normal exit)
+clear_results_cache() {
+    rm -f "$HUNTY_RESULTS_CACHE" "$HUNTY_SEARCH_META" 2>/dev/null
+}
+
+# Check if cached results exist and are still valid (30 min TTL)
+# Returns 0 if valid cache exists, outputs: pattern, time_mode, age_seconds
+check_cached_results() {
+    [[ -f "$HUNTY_RESULTS_CACHE" && -f "$HUNTY_SEARCH_META" ]] || return 1
+
+    local cached_pattern cached_time_mode cached_time
+    { read -r cached_pattern; read -r cached_time_mode; read -r cached_time; } < "$HUNTY_SEARCH_META"
+
+    # Cache valid for 30 minutes (1800 seconds)
+    local now age
+    now=$(date +%s)
+    age=$((now - cached_time))
+    [[ $age -lt 1800 ]] || return 1
+
+    # Output metadata for display
+    echo "$cached_pattern"
+    echo "$cached_time_mode"
+    echo "$age"
+}
+
+# Restore cached results and jump to fzf picker
+restore_and_show_picker() {
+    # Load results from cache (bash 3.2 compatible - no mapfile)
+    formatted_results=()
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        formatted_results+=("$line")
+    done < "$HUNTY_RESULTS_CACHE"
+
+    # Load metadata
+    { read -r SEARCH_PATTERN; read -r cached_time_mode; } < "$HUNTY_SEARCH_META"
+
+    if [ "$cached_time_mode" = "all" ]; then
+        SEARCH_ALL=true
+    else
+        DAYS="$cached_time_mode"
+    fi
+
+    local convo_count=${#formatted_results[@]}
+    gum style --foreground "$COLOR_SUCCESS" "Restored $convo_count conversation(s) from cache"
+    echo ""
+
+    # Build fzf input
+    local fzf_input=""
+    for result in "${formatted_results[@]}"; do
+        fzf_input+="${result}"$'\n'
+    done
+
+    # Preview command (same as in do_search)
+    local preview_cmd='
+        file=$(echo {} | cut -f2)
+        line=$(echo {} | cut -f3)
+        if [ -n "$file" ] && [ -f "$file" ] && [ -n "$line" ]; then
+            start=$((line - 15)); [ "$start" -lt 1 ] && start=1
+            end=$((line + 15))
+            sed -n "${start},${end}p" "$file" 2>/dev/null | while IFS= read -r jsonline; do
+                msg_type=$(echo "$jsonline" | jq -r ".type // empty" 2>/dev/null)
+                case "$msg_type" in
+                    user)
+                        content=$(echo "$jsonline" | jq -r ".message.content // empty" 2>/dev/null)
+                        if [ -n "$content" ] && [ "$content" != "null" ]; then
+                            printf "\033[96m━━━ 👤 USER ━━━\033[0m\n%s\n\n" "$(echo "$content" | head -c 2000)"
+                        fi
+                        ;;
+                    assistant)
+                        content=$(echo "$jsonline" | jq -r "(.message.content[]? | select(.type == \"text\") | .text) // empty" 2>/dev/null)
+                        if [ -n "$content" ] && [ "$content" != "null" ]; then
+                            printf "\033[92m━━━ 🤖 CLAUDE ━━━\033[0m\n%s\n\n" "$(echo "$content" | head -c 3000)"
+                        fi
+                        ;;
+                esac
+            done
+        else
+            echo "No preview available"
+        fi
+    '
+
+    local table_header
+    table_header=$(printf "Project                        │ Last        │ Msgs │ Snippet\n───────────────────────────────┼─────────────┼──────┼────────────────────────────\n↑↓ navigate │ Enter select │ Esc cancel")
+
+    # Selection loop
+    while true; do
+        local selection
+        selection=$(printf '%s' "$fzf_input" | fzf \
+            --ansi \
+            --delimiter=$'\t' \
+            --with-nth=1 \
+            --preview="$preview_cmd" \
+            --preview-window=right:50%:wrap:border-left \
+            --header="$table_header" \
+            --color="pointer:212,marker:212,hl:212,hl+:212,header:240,border:240" \
+            --bind="enter:accept" \
+            --no-info \
+            --layout=reverse \
+            --height=70% \
+            --border=rounded \
+            --border-label=" 🔍 hunty " \
+            --border-label-pos=3 \
+        )
+
+        # User pressed Esc - clear cache since they're done
+        if [ -z "$selection" ]; then
+            clear_results_cache
+            return 0
+        fi
+
+        local selected_file selected_line
+        selected_file=$(echo "$selection" | cut -f2)
+        selected_line=$(echo "$selection" | cut -f3)
+
+        if [ -n "$selected_file" ] && [ -n "$selected_line" ]; then
+            show_result_actions "$selected_file" "$selected_line"
+        fi
+    done
+}
+
+# Find transcript files based on filters
+find_transcripts() {
+    local fd_args=(-e jsonl)
+
+    if [ "$SEARCH_ALL" = false ]; then
+        fd_args+=(--changed-within "${DAYS}d")
+    fi
+
+    if [ -n "$PROJECT_FILTER" ]; then
+        # Find matching project directories first
+        fd -t d "$PROJECT_FILTER" "$PROJECTS_DIR" 2>/dev/null | while read -r dir; do
+            fd "${fd_args[@]}" . "$dir" 2>/dev/null
+        done
+    else
+        fd "${fd_args[@]}" . "$PROJECTS_DIR" 2>/dev/null
+    fi
+}
+
+# Extract readable content from a JSONL line
+parse_message() {
+    local line="$1"
+    local msg_type msg_content
+
+    msg_type=$(echo "$line" | jq -r '.type // empty' 2>/dev/null)
+
+    case "$msg_type" in
+        user)
+            msg_content=$(echo "$line" | jq -r '.message.content // empty' 2>/dev/null)
+            if [ -n "$msg_content" ]; then
+                echo "👤 $msg_content"
+            fi
+            ;;
+        assistant)
+            # Assistant content is an array, extract text blocks
+            msg_content=$(echo "$line" | jq -r '.message.content[]? | select(.type == "text") | .text // empty' 2>/dev/null | head -c 500)
+            if [ -n "$msg_content" ]; then
+                echo "🤖 $msg_content"
+            fi
+            ;;
+    esac
+}
+
+# Format a search result for display
+format_result() {
+    local file="$1"
+    local line_num="$2"
+    local content="$3"
+
+    # Extract project from path
+    local project_dir
+    project_dir=$(dirname "$file")
+    project_dir=$(basename "$project_dir")
+    local project_name
+    project_name=$(get_project_name "$project_dir")
+
+    # Get session ID from filename
+    local session_id
+    session_id=$(basename "$file" .jsonl)
+    session_id="${session_id:0:8}..."
+
+    # Get file modification time
+    local mod_time
+    mod_time=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$file" 2>/dev/null || stat -c "%y" "$file" 2>/dev/null | cut -d' ' -f1-2)
+
+    # Truncate content for display
+    local preview
+    preview=$(echo "$content" | head -c 200 | tr '\n' ' ')
+    [ ${#content} -gt 200 ] && preview="${preview}..."
+
+    echo "$file|$line_num|$project_name|$session_id|$mod_time|$preview"
+}
+
+# ═══════════════════════════════════════════════════════════════
+# SEARCH FUNCTIONS
+# ═══════════════════════════════════════════════════════════════
+
+do_search() {
+    local pattern="$1"
+    SEARCH_PATTERN="$pattern"  # Set global for cache
+
+    echo ""
+
+    # Start spinner while finding and searching
+    start_message_spinner
+
+    local files
+    files=$(find_transcripts)
+
+    if [ -z "$files" ]; then
+        stop_message_spinner
+        gum style --foreground "$COLOR_WARNING" "No transcript files found in the last ${DAYS} day(s)"
+        [ -n "$PROJECT_FILTER" ] && gum style --foreground "$COLOR_DIM" "Project filter: $PROJECT_FILTER"
+        return 1
+    fi
+
+    local file_count
+    file_count=$(echo "$files" | wc -l | tr -d ' ')
+
+    # Search with ripgrep (spinner is already running)
+    local results
+    local rg_args=(-i -n)
+    [ "$CONTEXT_LINES" -gt 0 ] && rg_args+=(-C "$CONTEXT_LINES")
+
+    results=$(echo "$files" | xargs rg "${rg_args[@]}" "$pattern" 2>/dev/null)
+
+    if [ -z "$results" ]; then
+        stop_message_spinner
+        gum style --foreground "$COLOR_WARNING" "No matches found for: $pattern"
+        return 1
+    fi
+
+    # Count and display matches (stop spinner briefly to show count)
+    local match_count
+    match_count=$(echo "$results" | wc -l | tr -d ' ')
+    stop_message_spinner
+    # Resume spinner while processing results
+    start_message_spinner
+
+    # Process results for interactive selection
+    # Track unique sessions with simple arrays (no associative arrays for compatibility)
+    local seen_files=()
+    local formatted_results=()
+
+    while IFS= read -r result; do
+        # Parse ripgrep output: file:line:content
+        local file line_num
+        file=$(echo "$result" | cut -d: -f1)
+        line_num=$(echo "$result" | cut -d: -f2)
+
+        # Skip if not a valid file
+        [ ! -f "$file" ] && continue
+
+        # Only keep first match per file (avoid duplicates)
+        local already_seen=false
+        for seen in "${seen_files[@]}"; do
+            [ "$seen" = "$file" ] && already_seen=true && break
+        done
+        [ "$already_seen" = true ] && continue
+        seen_files+=("$file")
+
+        # Parse the actual message content from the matched line
+        local parsed_content
+        parsed_content=$(sed -n "${line_num}p" "$file" 2>/dev/null | jq -r '
+            if .type == "user" then
+                "👤 " + (.message.content // "")
+            elif .type == "assistant" then
+                "🤖 " + ((.message.content[]? | select(.type == "text") | .text) // "")
+            else
+                ""
+            end
+        ' 2>/dev/null)
+
+        # Skip empty content (tool use entries without text)
+        if [ -z "$parsed_content" ] || [ "$parsed_content" = "👤 " ] || [ "$parsed_content" = "🤖 " ]; then
+            continue
+        fi
+
+        # Clean and truncate snippet
+        parsed_content=$(echo "$parsed_content" | LC_ALL=C tr -d '\n' | LC_ALL=C sed 's/[[:space:]]\+/ /g' | head -c 60)
+        [ ${#parsed_content} -ge 60 ] && parsed_content="${parsed_content}..."
+
+        # Get project path (shortened for display)
+        local project_dir decoded_path display_path
+        project_dir=$(dirname "$file")
+        project_dir=$(basename "$project_dir")
+        decoded_path=$(decode_project_path "$project_dir")
+        # Shorten home to ~ and show last parts of path
+        display_path="${decoded_path/#$HOME/\~}"
+        display_path="${display_path:0:30}"  # Allow up to 30 chars
+
+        # Get message count
+        local msg_count
+        msg_count=$(wc -l < "$file" 2>/dev/null | tr -d ' ')
+
+        # Get last modified time
+        local last_mod
+        last_mod=$(stat -f "%Sm" -t "%m-%d %H:%M" "$file" 2>/dev/null)
+
+        # Format display line with fixed widths
+        local display_line
+        display_line=$(printf "%-30s │ %-11s │ %4s │ %s" "$display_path" "$last_mod" "$msg_count" "$parsed_content")
+
+        # Store with tab delimiter: display<TAB>file<TAB>line_num
+        formatted_results+=("${display_line}	${file}	${line_num}")
+    done <<< "$results"
+
+    # Stop the spinner
+    stop_message_spinner
+
+    if [ ${#formatted_results[@]} -eq 0 ]; then
+        gum style --foreground "$COLOR_WARNING" "No parseable results found"
+        return 1
+    fi
+
+    # Show match stats: total ripgrep hits vs unique conversations
+    local convo_count=${#formatted_results[@]}
+    gum style --foreground "$COLOR_SUCCESS" "Found $match_count match(es) across $convo_count conversation(s)"
+    echo ""
+
+    # Check if we have a TTY for interactive selection
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        # Non-interactive: just print results (cut on tab to get display part)
+        printf '%s\n' "${formatted_results[@]}" | cut -f1 | head -20
+        echo ""
+        gum style --foreground "$COLOR_DIM" "(Showing first 20 results. Run interactively for full selection.)"
+        return 0
+    fi
+
+    # Build fzf input (already tab-delimited in formatted_results)
+    local fzf_input=""
+    for result in "${formatted_results[@]}"; do
+        fzf_input+="${result}"$'\n'
+    done
+
+    # Create preview command that shows context around the match
+    local preview_cmd='
+        file=$(echo {} | cut -f2)
+        line=$(echo {} | cut -f3)
+        if [ -n "$file" ] && [ -f "$file" ] && [ -n "$line" ]; then
+            start=$((line - 15)); [ "$start" -lt 1 ] && start=1
+            end=$((line + 15))
+            sed -n "${start},${end}p" "$file" 2>/dev/null | while IFS= read -r jsonline; do
+                msg_type=$(echo "$jsonline" | jq -r ".type // empty" 2>/dev/null)
+                case "$msg_type" in
+                    user)
+                        content=$(echo "$jsonline" | jq -r ".message.content // empty" 2>/dev/null)
+                        if [ -n "$content" ] && [ "$content" != "null" ]; then
+                            printf "\033[96m━━━ 👤 USER ━━━\033[0m\n%s\n\n" "$(echo "$content" | head -c 2000)"
+                        fi
+                        ;;
+                    assistant)
+                        content=$(echo "$jsonline" | jq -r "(.message.content[]? | select(.type == \"text\") | .text) // empty" 2>/dev/null)
+                        if [ -n "$content" ] && [ "$content" != "null" ]; then
+                            printf "\033[92m━━━ 🤖 CLAUDE ━━━\033[0m\n%s\n\n" "$(echo "$content" | head -c 3000)"
+                        fi
+                        ;;
+                esac
+            done
+        else
+            echo "No preview available"
+        fi
+    '
+
+    # Build header with table column labels
+    local table_header
+    table_header=$(printf "Project                        │ Last        │ Msgs │ Snippet\n───────────────────────────────┼─────────────┼──────┼────────────────────────────\n↑↓ navigate │ Enter select │ Esc cancel")
+
+    # Selection loop - allows "Back to results" to return here
+    while true; do
+        local selection
+        selection=$(printf '%s' "$fzf_input" | fzf \
+            --ansi \
+            --delimiter=$'\t' \
+            --with-nth=1 \
+            --preview="$preview_cmd" \
+            --preview-window=right:50%:wrap:border-left \
+            --header="$table_header" \
+            --color="pointer:212,marker:212,hl:212,hl+:212,header:240,border:240" \
+            --bind="enter:accept" \
+            --no-info \
+            --layout=reverse \
+            --height=70% \
+            --border=rounded \
+            --border-label=" 🔍 hunty " \
+            --border-label-pos=3 \
+        )
+
+        # User pressed Esc or cancelled - clear cache since they're done
+        if [ -z "$selection" ]; then
+            clear_results_cache
+            return 0
+        fi
+
+        # Extract file and line from selection
+        local selected_file selected_line
+        selected_file=$(echo "$selection" | cut -f2)
+        selected_line=$(echo "$selection" | cut -f3)
+
+        if [ -n "$selected_file" ] && [ -n "$selected_line" ]; then
+            show_result_actions "$selected_file" "$selected_line"
+            # After action menu returns (e.g., "Back to results"), loop continues
+        fi
+    done
+}
+
+view_full_session() {
+    local file="$1"
+    # Parse all messages and format for reading
+    jq -r 'select(.type == "user" or .type == "assistant") |
+        if .type == "user" then "\n👤 USER:\n" + .message.content
+        elif .type == "assistant" then "\n🤖 CLAUDE:\n" + ((.message.content[]? | select(.type == "text") | .text) // "")
+        else ""
+        end' "$file" 2>/dev/null | bat --style=plain --paging=always 2>/dev/null || less
+}
+
+find_parent_session() {
+    # Given a subagent session ID, find the parent conversation that spawned it
+    local subagent_session_id="$1"
+
+    # Search all project transcripts (excluding subagents) for Task tool results mentioning this session
+    local parent_file=""
+    local parent_session=""
+
+    while IFS= read -r candidate_file; do
+        # Skip subagents directory
+        [[ "$candidate_file" == *"/subagents/"* ]] && continue
+
+        # Check if this file contains a reference to our subagent session ID
+        if grep -q "$subagent_session_id" "$candidate_file" 2>/dev/null; then
+            parent_file="$candidate_file"
+            parent_session=$(jq -r 'select(.sessionId != null) | .sessionId' "$parent_file" 2>/dev/null | head -1)
+            break
+        fi
+    done < <(fd -e jsonl . "$PROJECTS_DIR" 2>/dev/null)
+
+    if [ -n "$parent_file" ] && [ -n "$parent_session" ]; then
+        echo "${parent_file}|${parent_session}"
+    fi
+}
+
+resume_session() {
+    local file="$1"
+    local session_id
+    session_id=$(jq -r 'select(.sessionId != null) | .sessionId' "$file" 2>/dev/null | head -1)
+
+    # Get project path from encoded directory name
+    local project_dir encoded_path decoded_path
+    project_dir=$(dirname "$file")
+    encoded_path=$(basename "$project_dir")
+    decoded_path=$(decode_project_path "$encoded_path")
+
+    # Check if this is a subagent (path is "subagents" or doesn't exist)
+    if [ "$decoded_path" = "subagents" ] || [ ! -d "$decoded_path" ]; then
+        gum style --foreground "$COLOR_WARNING" "This is a subagent conversation - can't resume directly"
+        gum style --foreground "$COLOR_DIM" "Searching for parent conversation..."
+        echo ""
+
+        # Try to find the parent conversation
+        local parent_info
+        parent_info=$(find_parent_session "$session_id")
+
+        if [ -n "$parent_info" ]; then
+            local parent_file parent_session parent_dir parent_encoded parent_decoded
+            parent_file=$(echo "$parent_info" | cut -d'|' -f1)
+            parent_session=$(echo "$parent_info" | cut -d'|' -f2)
+            parent_dir=$(dirname "$parent_file")
+            parent_encoded=$(basename "$parent_dir")
+            parent_decoded=$(decode_project_path "$parent_encoded")
+
+            gum style --foreground "$COLOR_SUCCESS" "Found parent conversation!"
+            gum style --foreground "$COLOR_INFO" "Project: $parent_decoded"
+            echo ""
+
+            local choice
+            choice=$(gum choose --cursor.foreground="$COLOR_PINK" --selected.foreground="$COLOR_PINK" \
+                "Resume parent conversation" \
+                "Cancel")
+
+            if [ "$choice" = "Resume parent conversation" ]; then
+                gum style --foreground "$COLOR_SUCCESS" "Resuming parent session in: $parent_decoded"
+                sleep 0.5
+                save_results_to_cache  # Preserve results for when user returns
+                exec bash -c "cd '$parent_decoded' && claude --resume '$parent_session'"
+            fi
+        else
+            gum style --foreground "$COLOR_ERROR" "Could not find parent conversation"
+            gum style --foreground "$COLOR_DIM" "The parent may have been in a different time range"
+            sleep 2
+        fi
+        return
+    fi
+
+    if [ -n "$session_id" ] && [ -d "$decoded_path" ]; then
+        gum style --foreground "$COLOR_SUCCESS" "Resuming session in: $decoded_path"
+        sleep 0.5
+        save_results_to_cache  # Preserve results for when user returns
+        exec bash -c "cd '$decoded_path' && claude --resume '$session_id'"
+    else
+        gum style --foreground "$COLOR_ERROR" "Could not find session ID or project path"
+        gum style --foreground "$COLOR_DIM" "Session: ${session_id:-unknown}"
+        gum style --foreground "$COLOR_DIM" "Path: ${decoded_path:-unknown}"
+        sleep 2
+    fi
+}
+
+open_in_vscode() {
+    local file="$1"
+    code "$file"
+}
+
+show_result_actions() {
+    local file="$1"
+    local line_num="$2"
+
+    clear
+    echo ""
+
+    # Get project info
+    local project_dir
+    project_dir=$(dirname "$file")
+    project_dir=$(basename "$project_dir")
+    local project_name
+    project_name=$(get_project_name "$project_dir")
+    local decoded_path
+    decoded_path=$(decode_project_path "$project_dir")
+
+    # Get session ID
+    local session_id
+    session_id=$(jq -r 'select(.sessionId != null) | .sessionId' "$file" 2>/dev/null | head -1)
+
+    gum style --foreground "$COLOR_PINK" --bold "🔍 SELECTED CONVERSATION"
+    gum style --foreground "$COLOR_DIM" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    gum style --foreground "$COLOR_INFO" "Project: $decoded_path"
+    gum style --foreground "$COLOR_DIM" "Session: ${session_id:-unknown}"
+    echo ""
+
+    # Show a quick preview (3 messages around the match)
+    local start=$((line_num - 1))
+    [ "$start" -lt 1 ] && start=1
+    local end=$((line_num + 1))
+
+    sed -n "${start},${end}p" "$file" | while IFS= read -r line; do
+        local msg_type content
+        msg_type=$(echo "$line" | jq -r '.type // empty' 2>/dev/null)
+
+        case "$msg_type" in
+            user)
+                content=$(echo "$line" | jq -r '.message.content // empty' 2>/dev/null | head -c 200)
+                [ -n "$content" ] && gum style --foreground "$COLOR_INFO" "👤 ${content}..."
+                ;;
+            assistant)
+                content=$(echo "$line" | jq -r '(.message.content[]? | select(.type == "text") | .text) // empty' 2>/dev/null | head -c 200)
+                [ -n "$content" ] && gum style --foreground "$COLOR_SUCCESS" "🤖 ${content}..."
+                ;;
+        esac
+    done
+
+    echo ""
+    gum style --foreground "$COLOR_DIM" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    # Action menu
+    local action
+    action=$(gum choose --cursor.foreground="$COLOR_PINK" --selected.foreground="$COLOR_PINK" \
+        "Resume session" \
+        "View in pager" \
+        "Open in VSCode" \
+        "Copy session ID" \
+        "← Back to results")
+
+    case "$action" in
+        "Resume session")
+            resume_session "$file"
+            ;;
+        "View in pager")
+            view_full_session "$file"
+            ;;
+        "Open in VSCode")
+            open_in_vscode "$file"
+            ;;
+        "Copy session ID")
+            if [ -n "$session_id" ]; then
+                echo "$session_id" | pbcopy 2>/dev/null || echo "$session_id" | xclip -selection clipboard 2>/dev/null
+                gum style --foreground "$COLOR_SUCCESS" "Session ID copied: $session_id"
+            else
+                gum style --foreground "$COLOR_ERROR" "No session ID found"
+            fi
+            sleep 1
+            ;;
+        "← Back to results")
+            return 0
+            ;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════
+# INTERACTIVE MODE
+# ═══════════════════════════════════════════════════════════════
+
+interactive_mode() {
+    clear
+    echo ""
+    gum style --foreground "$COLOR_PINK" --bold "🔍 HUNTY 🔍"
+    gum style --foreground 250 "Search your Claude Code conversations"
+    echo ""
+
+    # Check for cached results from previous session
+    local cached_info
+    if cached_info=$(check_cached_results); then
+        local cached_pattern cached_time_mode cached_age age_mins time_desc
+        { read -r cached_pattern; read -r cached_time_mode; read -r cached_age; } <<< "$cached_info"
+        age_mins=$((cached_age / 60))
+
+        # Format time description
+        if [ "$cached_time_mode" = "all" ]; then
+            time_desc="all time"
+        else
+            time_desc="last ${cached_time_mode}d"
+        fi
+
+        local choice
+        choice=$(gum choose --cursor.foreground="$COLOR_PINK" --selected.foreground="$COLOR_PINK" \
+            "Restore previous: \"$cached_pattern\" ($time_desc, ${age_mins}m ago)" \
+            "New search")
+
+        if [[ "$choice" == Restore* ]]; then
+            restore_and_show_picker
+            return
+        fi
+
+        # User chose new search - continue below
+        echo ""
+    fi
+
+    # Get search pattern
+    local pattern
+    pattern=$(gum input --placeholder "Enter search pattern..." --cursor.foreground="$COLOR_PINK" --prompt.foreground="$COLOR_PINK" --prompt "Search: ")
+
+    if [ -z "$pattern" ]; then
+        gum style --foreground "$COLOR_WARNING" "$(random_exit_message)"
+        exit 0
+    fi
+
+    echo ""
+
+    # Ask for time range
+    local time_choice
+    time_choice=$(gum choose --cursor.foreground="$COLOR_PINK" --selected.foreground="$COLOR_PINK" \
+        "Today only" \
+        "Last 3 days" \
+        "Last 7 days" \
+        "Last 30 days" \
+        "All time")
+
+    case "$time_choice" in
+        "Today only") DAYS=1 ;;
+        "Last 3 days") DAYS=3 ;;
+        "Last 7 days") DAYS=7 ;;
+        "Last 30 days") DAYS=30 ;;
+        "All time") SEARCH_ALL=true ;;
+    esac
+
+    echo ""
+    do_search "$pattern"
+}
+
+# ═══════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════
+
+if [ -z "$SEARCH_PATTERN" ]; then
+    interactive_mode
+else
+    do_search "$SEARCH_PATTERN"
+fi

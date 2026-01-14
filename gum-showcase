@@ -1,0 +1,322 @@
+#!/bin/bash
+
+# gum-showcase - A tour of everything gum can do
+# Because CLI tools deserve to be GORGEOUS
+
+# Check for gum
+if ! command -v gum &> /dev/null; then
+    echo "gum is not installed! Run: brew install gum"
+    exit 1
+fi
+
+clear
+
+# ═══════════════════════════════════════════════════════════════
+# HEADER
+# ═══════════════════════════════════════════════════════════════
+
+gum style \
+    --foreground 212 --border-foreground 212 --border double \
+    --align center --width 60 --margin "1 2" --padding "1 2" \
+    '✨ THE GUM SHOWCASE ✨' '' \
+    'Everything the gum CLI can do' \
+    'Prepare to be OBSESSED'
+
+sleep 1
+
+# ═══════════════════════════════════════════════════════════════
+# SPINNERS
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "1. SPINNERS - She spins, she waits, she SERVES"
+
+SPINNERS=("line" "dot" "minidot" "jump" "pulse" "points" "globe" "moon" "monkey" "meter" "hamburger")
+
+for spinner in "${SPINNERS[@]}"; do
+    gum spin --spinner "$spinner" --spinner.foreground="212" --title "Spinner: $spinner" -- sleep 0.8
+done
+
+echo ""
+gum style --foreground 82 "✓ Spinners complete - 11 different vibes!"
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# STYLED TEXT
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "2. STYLED TEXT - Because plain text is giving nothing"
+
+echo ""
+gum style --foreground 212 "Pink text"
+gum style --foreground 82 "Green text"
+gum style --foreground 214 "Orange text"
+gum style --foreground 196 --bold "Bold red text"
+gum style --foreground 99 --italic "Italic purple text"
+gum style --foreground 51 --underline "Underlined cyan text"
+gum style --foreground 226 --strikethrough "Strikethrough yellow (cancelled plans energy)"
+
+echo ""
+gum style --foreground 82 "✓ Text styling complete!"
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# BORDERS
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "3. BORDERS - Frame your content like the art it is"
+
+echo ""
+gum style --border normal --border-foreground 212 --padding "0 2" "Normal border"
+gum style --border rounded --border-foreground 82 --padding "0 2" "Rounded border"
+gum style --border thick --border-foreground 214 --padding "0 2" "Thick border"
+gum style --border double --border-foreground 51 --padding "0 2" "Double border (fancy)"
+gum style --border hidden --background 236 --padding "0 2" "Hidden border (background only)"
+
+echo ""
+gum style --foreground 82 "✓ Borders complete!"
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# CONFIRM
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "4. CONFIRM - Yes/No prompts but make it fashion"
+
+if gum confirm "Are you enjoying this showcase?" --affirmative "Absolutely" --negative "It's okay I guess"; then
+    gum style --foreground 82 --bold "✨ TASTE. You have it."
+else
+    gum style --foreground 214 "The audacity... but I respect the honesty."
+fi
+
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# CHOOSE
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "5. CHOOSE - Selection menus that actually look good"
+
+CHOICE=$(gum choose --cursor.foreground="212" --selected.foreground="212" \
+    "Option A - The safe choice" \
+    "Option B - The spicy choice" \
+    "Option C - The chaotic choice" \
+    "Option D - The unhinged choice")
+
+gum style --foreground 82 "You chose: $CHOICE"
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# INPUT
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "6. INPUT - Text input that doesn't look like 1995"
+
+NAME=$(gum input --placeholder "What should I call you?" --cursor.foreground="212" --prompt.foreground="212" --prompt "→ ")
+
+if [ -n "$NAME" ]; then
+    gum style --foreground 82 "Nice to meet you, $NAME! 💅"
+else
+    gum style --foreground 214 "Playing mysterious, I see..."
+fi
+
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# FILTER
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "7. FILTER - Fuzzy search through lists"
+
+FRAMEWORKS=("React" "Vue" "Angular" "Svelte" "SolidJS" "Qwik" "Astro" "Next.js" "Nuxt" "Remix")
+
+gum style --foreground 250 --italic "Type to filter your favorite framework..."
+FRAMEWORK=$(printf '%s\n' "${FRAMEWORKS[@]}" | gum filter --placeholder "Search frameworks..." --indicator.foreground="212" --match.foreground="212")
+
+if [ -n "$FRAMEWORK" ]; then
+    gum style --foreground 82 "Ah, a $FRAMEWORK girlie. Valid."
+fi
+
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# WRITE (Multi-line)
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "8. WRITE - Multi-line text editor in your terminal"
+
+gum style --foreground 250 --italic "Write a haiku about deployments (Ctrl+D or Esc to finish)..."
+
+HAIKU=$(gum write --placeholder "Your haiku here..." --char-limit 200 --width 50 --show-line-numbers)
+
+if [ -n "$HAIKU" ]; then
+    echo ""
+    gum style --border rounded --border-foreground 212 --padding "1 2" --foreground 212 "$HAIKU"
+    gum style --foreground 82 "Poetry. Art. Literature."
+fi
+
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# FORMAT (Markdown)
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "9. FORMAT - Render markdown beautifully"
+
+echo '# Hello World
+This is **bold** and this is *italic*.
+
+- Bullet point one
+- Bullet point two
+
+> A blockquote for the dramatic moments
+
+```bash
+echo "Code blocks too!"
+```
+' | gum format
+
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# TABLE
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "10. TABLE - Data but make it readable"
+
+echo ""
+gum table << EOF
+Name,Status,Vibe
+Production,Stable,Chill
+Staging,Deploying,Tense
+Local,Broken,Unhinged
+EOF
+
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# JOIN
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "11. JOIN - Combine elements horizontally"
+
+echo ""
+gum join --horizontal \
+    "$(gum style --border rounded --border-foreground 196 --padding '0 2' '🔴 Error')" \
+    "$(gum style --border rounded --border-foreground 226 --padding '0 2' '🟡 Warning')" \
+    "$(gum style --border rounded --border-foreground 82 --padding '0 2' '🟢 Success')"
+
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# LOG
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "12. LOG - Structured logging with levels"
+
+echo ""
+gum log --level debug "This is a debug message"
+gum log --level info "This is an info message"
+gum log --level warn "This is a warning message"
+gum log --level error "This is an error message"
+
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# FILE PICKER
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "13. FILE - Interactive file picker"
+
+gum style --foreground 250 --italic "Pick a file from this directory..."
+
+FILE=$(gum file --height 8 .)
+
+if [ -n "$FILE" ]; then
+    gum style --foreground 82 "Selected: $FILE"
+fi
+
+sleep 0.5
+
+# ═══════════════════════════════════════════════════════════════
+# PAGER
+# ═══════════════════════════════════════════════════════════════
+
+gum style --foreground 212 --bold --margin "1 0" "14. PAGER - Scroll through long content"
+
+gum style --foreground 250 --italic "Press q to exit the pager..."
+sleep 1
+
+cat << 'EOF' | gum pager --soft-wrap
+╔══════════════════════════════════════════════════════════════╗
+║                     THE GUM MANIFESTO                        ║
+╠══════════════════════════════════════════════════════════════╣
+║                                                              ║
+║  In the beginning, there was the terminal.                   ║
+║  And the terminal was dark, and without style.               ║
+║                                                              ║
+║  Then Charm said: "Let there be gum."                        ║
+║  And there was gum.                                          ║
+║                                                              ║
+║  And developers saw that it was good.                        ║
+║  Actually, it was FABULOUS.                                  ║
+║                                                              ║
+║  Gone were the days of ugly prompts.                         ║
+║  Gone were the days of basic spinners.                       ║
+║  Gone were the days of unreadable output.                    ║
+║                                                              ║
+║  For gum brought:                                            ║
+║    • Spinners that SPIN                                      ║
+║    • Colors that POP                                         ║
+║    • Borders that FRAME                                      ║
+║    • Prompts that PROMPT (but stylishly)                     ║
+║                                                              ║
+║  And on the seventh day, developers rested.                  ║
+║  Their CLIs were beautiful.                                  ║
+║  Their users were happy.                                     ║
+║  Their terminals were ICONIC.                                ║
+║                                                              ║
+║  The end.                                                    ║
+║                                                              ║
+║  (But actually, it's just the beginning)                     ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+SCROLL DOWN FOR MORE...
+
+Features we covered today:
+1.  spin      - Animated spinners while commands run
+2.  style     - Style text with colors, borders, padding
+3.  confirm   - Yes/No prompts
+4.  choose    - Selection from a list
+5.  input     - Single-line text input
+6.  filter    - Fuzzy filtering of lists
+7.  write     - Multi-line text input
+8.  format    - Render markdown
+9.  table     - Display tabular data
+10. join      - Combine styled elements
+11. log       - Structured logging
+12. file      - File picker
+13. pager     - Scroll through content
+
+More at: https://github.com/charmbracelet/gum
+EOF
+
+# ═══════════════════════════════════════════════════════════════
+# FINALE
+# ═══════════════════════════════════════════════════════════════
+
+clear
+
+gum style \
+    --foreground 212 --border-foreground 212 --border double \
+    --align center --width 60 --margin "2" --padding "2" \
+    '✨ SHOWCASE COMPLETE ✨' '' \
+    'Your terminal will never be the same.' '' \
+    'go forth and make beautiful CLIs' \
+    '💅'
+
+echo ""
+gum style --foreground 250 --align center --width 60 \
+    "Install: brew install gum" \
+    "Docs: https://github.com/charmbracelet/gum"
+echo ""

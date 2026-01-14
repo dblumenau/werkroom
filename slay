@@ -1,0 +1,379 @@
+#!/bin/bash
+
+# slay - Monitor a health endpoint for a specific version deployment
+# Usage: slay [-i interval] <url> <version> [message]
+# Version: 2.0.0
+
+VERSION="2.0.0"
+
+# ═══════════════════════════════════════════════════════════════
+# SOURCE LIBRARY MODULES
+# ═══════════════════════════════════════════════════════════════
+# Resolve symlinks to find the real script location
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    [[ "$SCRIPT_PATH" != /* ]] && SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/slay-lib"
+
+source "$LIB_DIR/colors.sh"
+source "$LIB_DIR/check-deps.sh"
+source "$LIB_DIR/messages.sh"
+source "$LIB_DIR/project-cache.sh"
+source "$LIB_DIR/git-sync.sh"
+source "$LIB_DIR/actions.sh"
+source "$LIB_DIR/interactive.sh"
+source "$LIB_DIR/watch-loop.sh"
+
+# ═══════════════════════════════════════════════════════════════
+# CONFIGURATION
+# ═══════════════════════════════════════════════════════════════
+
+# Load optional config file
+SLAY_CONFIG_FILE="${SLAY_CONFIG:-$HOME/.config/slay/config}"
+if [ -f "$SLAY_CONFIG_FILE" ]; then
+    source "$SLAY_CONFIG_FILE"
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# GLOBAL STATE
+# ═══════════════════════════════════════════════════════════════
+
+# Handle Ctrl+C - return to picker in interactive mode, exit in direct mode
+INTERACTIVE_MODE=false
+WATCH_CANCELLED=false
+DEMO_MODE=false
+
+cleanup() {
+    echo ""
+    echo -e "\033[0m"  # Reset colors
+    if [ "$INTERACTIVE_MODE" = true ]; then
+        WATCH_CANCELLED=true
+    else
+        exit 0
+    fi
+}
+trap cleanup SIGINT SIGTERM
+
+INTERVAL=30
+TIMEOUT_SECONDS=600  # 10 minutes
+START_TIME="$(date +%s)"
+INITIAL_VERSION=""   # For "any change" mode
+CACHE_FILE="$HOME/.cache/slay-projects"
+REFRESH_CACHE=false
+
+# Projects directory - configurable via env var or config file
+PROJECTS_DIR="${SLAY_PROJECTS_DIR:-${PROJECTS_DIR:-$HOME/projects}}"
+
+# Dependency check test mode
+TEST_DEPS_MODE=false
+
+# Check for gum
+HAS_GUM=false
+if command -v gum &> /dev/null; then
+    HAS_GUM=true
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# HELP
+# ═══════════════════════════════════════════════════════════════
+
+show_help() {
+    if command -v gum &> /dev/null; then
+        show_help_gum
+    else
+        show_help_ansi
+    fi
+    exit 0
+}
+
+show_help_gum() {
+    echo ""
+    gum style --foreground 212 --bold --align center "✨ S L A Y ✨"
+    gum style --foreground 212 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    gum style --foreground 255 "She watches. She waits. She $(gum style --bold "SLAYS")."
+    echo ""
+
+    gum style --foreground 51 --bold "USAGE"
+    echo "  $(gum style --foreground 255 "slay")                                    $(gum style --foreground 240 --italic "(interactive project picker)")"
+    echo "  $(gum style --foreground 255 "slay") $(gum style --foreground 240 "[options]") $(gum style --foreground 82 "<url>") $(gum style --foreground 214 "<version>") $(gum style --foreground 240 "[message]")"
+    echo ""
+
+    gum style --foreground 51 --bold "INTERACTIVE MODE  $(gum style --foreground 240 --italic "(just run: slay)")"
+    echo "  $(gum style --foreground 212 "•") $(gum style --foreground 255 "Watch for new tag")     Monitor a deployment for version changes"
+    echo "  $(gum style --foreground 212 "•") $(gum style --foreground 255 "Sync to master")        Stash, switch branch, pull $(gum style --foreground 240 --italic "(hotfix-ready in seconds)")"
+    echo "  $(gum style --foreground 212 "•") $(gum style --foreground 255 "Composer install")      Run composer install with correct PHP version"
+    echo "  $(gum style --foreground 212 "•") $(gum style --foreground 255 "npm install")           Run npm install with correct Node version"
+    echo "  $(gum style --foreground 212 "•") $(gum style --foreground 255 "Run schedule")          Run artisan schedule:run $(gum style --foreground 240 --italic "(background + watch notification)")"
+    echo "  $(gum style --foreground 212 "•") $(gum style --foreground 255 "Open in VSCode")        Open project root or specific service"
+    echo "  $(gum style --foreground 212 "•") $(gum style --foreground 255 "Demo mode")             Preview the spinner phases $(gum style --foreground 240 --italic "(chill → antsy → unhinged)")"
+    echo ""
+
+    gum style --foreground 51 --bold "DIRECT MODE"
+    echo "  $(gum style --foreground 255 "slay") $(gum style --foreground 82 "<url>") $(gum style --foreground 214 "<version>") $(gum style --foreground 240 "[message]")"
+    echo ""
+    gum style --foreground 51 --bold "  ARGUMENTS"
+    echo "    $(gum style --foreground 82 "url")        Health endpoint to poll $(gum style --foreground 240 --italic "(the one with the version tea)")"
+    echo "    $(gum style --foreground 214 "version")    The version you're manifesting into existence"
+    echo "    $(gum style --foreground 240 "message")    Custom notification text $(gum style --foreground 240 --italic "(optional, but make it cute)")"
+    echo ""
+
+    gum style --foreground 51 --bold "OPTIONS"
+    echo "  $(gum style --foreground 33 -- "-i"), $(gum style --foreground 33 -- "--interval") $(gum style --foreground 255 -- "<seconds>")    Time between checks $(gum style --foreground 240 --italic -- "(default: 30s, queen)")"
+    echo "  $(gum style --foreground 33 -- "-r"), $(gum style --foreground 33 -- "--refresh")               Rebuild the project cache"
+    echo "  $(gum style --foreground 33 -- "-h"), $(gum style --foreground 33 -- "--help")                  You're looking at her $(gum style --foreground 212 -- "💅")"
+    echo ""
+
+    gum style --foreground 51 --bold "COMMANDS"
+    echo "  $(gum style --foreground 33 "update")                    Pull latest updates from GitHub"
+    echo ""
+
+    gum style --foreground 51 --bold "EXAMPLES"
+    gum style --foreground 240 --italic "  # Interactive mode - the full experience"
+    echo "  $(gum style --foreground 255 "slay")"
+    echo ""
+    gum style --foreground 240 --italic "  # Direct mode - she does the work, you do the brunch"
+    echo "  $(gum style --foreground 255 "slay") $(gum style --foreground 82 "https://staging.example.com/healthz") $(gum style --foreground 214 "0.0.40")"
+    echo ""
+    gum style --foreground 240 --italic "  # Impatient era - check every 10 seconds"
+    echo "  $(gum style --foreground 255 "slay") $(gum style --foreground 33 -- "-i 10") $(gum style --foreground 82 "https://staging.example.com/healthz") $(gum style --foreground 214 "0.0.40")"
+    echo ""
+
+    gum style --foreground 51 --bold "THE FINE PRINT"
+    echo "  $(gum style --foreground 212 "•") Polls every $(gum style --foreground 255 "30s") by default $(gum style --foreground 240 --italic -- "(or your -i vibe)")"
+    echo "  $(gum style --foreground 212 "•") When version matches, waits $(gum style --foreground 255 "3s") and double-checks $(gum style --foreground 240 --italic "(no flicker drama)")"
+    echo "  $(gum style --foreground 212 "•") Auto-exits after $(gum style --foreground 255 "10 min") $(gum style --foreground 240 --italic "(no zombie processes in THIS house)")"
+    echo "  $(gum style --foreground 212 "•") Sends $(gum style --foreground 214 --bold "EMERGENCY") notification - repeats until you acknowledge"
+    echo ""
+
+    gum style --foreground 212 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    gum style --foreground 240 --italic "\"I'm not a regular script, I'm a $(gum style --foreground 212 "cool") script.\" - slay, probably"
+    echo ""
+}
+
+show_help_ansi() {
+    echo -e "
+  ${PINK}${B}✨ S L A Y ✨${R}
+  ${PINK}━━━━━━━━━━━━━${R}
+  ${WHITE}She watches. She waits. She ${B}SLAYS${R}${WHITE}.${R}
+
+  ${CYAN}${B}USAGE${R}
+    ${WHITE}slay${R}                                    ${DIM}(interactive project picker)${R}
+    ${WHITE}slay ${GRAY}[options]${R} ${GREEN}<url>${R} ${YELLOW}<version>${R} ${GRAY}[message]${R}
+
+  ${CYAN}${B}INTERACTIVE MODE${R}  ${DIM}(just run: slay)${R}
+    ${PINK}•${R} ${WHITE}Watch for new tag${R}     Monitor a deployment for version changes
+    ${PINK}•${R} ${WHITE}Sync to master${R}        Stash, switch branch, pull ${DIM}(hotfix-ready in seconds)${R}
+    ${PINK}•${R} ${WHITE}Composer install${R}      Run composer install with correct PHP version
+    ${PINK}•${R} ${WHITE}npm install${R}           Run npm install with correct Node version
+    ${PINK}•${R} ${WHITE}Run schedule${R}          Run artisan schedule:run ${DIM}(background + watch notification)${R}
+    ${PINK}•${R} ${WHITE}Open in VSCode${R}        Open project root or specific service
+    ${PINK}•${R} ${WHITE}Demo mode${R}             Preview the spinner phases ${DIM}(chill → antsy → unhinged)${R}
+
+  ${CYAN}${B}DIRECT MODE${R}
+    ${WHITE}slay ${GREEN}<url>${R} ${YELLOW}<version>${R} ${GRAY}[message]${R}
+
+    ${CYAN}${B}ARGUMENTS${R}
+      ${GREEN}url${R}        Health endpoint to poll ${DIM}(the one with the version tea)${R}
+      ${YELLOW}version${R}    The version you're manifesting into existence
+      ${GRAY}message${R}    Custom notification text ${DIM}(optional, but make it cute)${R}
+
+  ${CYAN}${B}OPTIONS${R}
+    ${BLUE}-i${R}, ${BLUE}--interval${R} ${WHITE}<seconds>${R}    Time between checks ${DIM}(default: 30s, queen)${R}
+    ${BLUE}-r${R}, ${BLUE}--refresh${R}               Rebuild the project cache
+    ${BLUE}-h${R}, ${BLUE}--help${R}                  You're looking at her ${PINK}💅${R}
+
+  ${CYAN}${B}COMMANDS${R}
+    ${BLUE}update${R}                    Pull latest updates from GitHub
+
+  ${CYAN}${B}EXAMPLES${R}
+    ${GRAY}# Interactive mode - the full experience${R}
+    ${WHITE}slay${R}
+
+    ${GRAY}# Direct mode - she does the work, you do the brunch${R}
+    ${WHITE}slay ${GREEN}https://staging.example.com/healthz${R} ${YELLOW}0.0.40${R}
+
+    ${GRAY}# Impatient era - check every 10 seconds${R}
+    ${WHITE}slay ${BLUE}-i 10${R} ${GREEN}https://staging.example.com/healthz${R} ${YELLOW}0.0.40${R}
+
+  ${CYAN}${B}THE FINE PRINT${R}
+    ${PINK}•${R} Polls every ${WHITE}30s${R} by default ${DIM}(or your -i vibe)${R}
+    ${PINK}•${R} When version matches, waits ${WHITE}3s${R} and double-checks ${DIM}(no flicker drama)${R}
+    ${PINK}•${R} Auto-exits after ${WHITE}10 min${R} ${DIM}(no zombie processes in THIS house)${R}
+    ${PINK}•${R} Sends ${B}${YELLOW}EMERGENCY${R} notification - repeats until you acknowledge
+
+  ${PINK}━━━━━━━━━━━━━${R}
+  ${DIM}\"I'm not a regular script, I'm a ${PINK}cool${R}${DIM} script.\" - slay, probably${R}
+"
+}
+
+# Need BLUE for help text
+BLUE='\033[94m'
+
+# ═══════════════════════════════════════════════════════════════
+# SELF-UPDATE
+# ═══════════════════════════════════════════════════════════════
+
+do_update() {
+    local current_version="$VERSION"
+
+    if [ "$HAS_GUM" = true ]; then
+        echo ""
+        gum style --foreground 212 --bold "✨ UPDATING SLAY ✨"
+        echo ""
+
+        gum spin --spinner "$(random_spinner)" --spinner.foreground="212" --title "Fetching latest tea from GitHub..." -- \
+            git -C "$SCRIPT_DIR" fetch origin master 2>/dev/null
+
+        # Check if we're behind
+        local local_hash remote_hash
+        local_hash=$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null)
+        remote_hash=$(git -C "$SCRIPT_DIR" rev-parse origin/master 2>/dev/null)
+
+        if [ "$local_hash" = "$remote_hash" ]; then
+            gum style --foreground 82 "Already on the latest version, queen! ✨"
+            gum style --foreground 250 "Current: v$current_version"
+            exit 0
+        fi
+
+        # Show what's coming
+        echo ""
+        gum style --foreground 250 "New commits incoming:"
+        git -C "$SCRIPT_DIR" log --oneline HEAD..origin/master 2>/dev/null | head -5 | while read -r line; do
+            gum style --foreground 51 "  • $line"
+        done
+        echo ""
+
+        # Pull the changes
+        gum spin --spinner "$(random_spinner)" --spinner.foreground="212" --title "Pulling updates..." -- \
+            git -C "$SCRIPT_DIR" pull origin master 2>/dev/null
+
+        # Get new version
+        local new_version
+        new_version=$(grep '^VERSION=' "$SCRIPT_DIR/slay" 2>/dev/null | cut -d'"' -f2)
+
+        echo ""
+        gum style --foreground 82 --bold "Glow up complete! 💅"
+        if [ "$new_version" != "$current_version" ]; then
+            gum style --foreground 250 "Updated: v$current_version → v$new_version"
+        else
+            gum style --foreground 250 "Version: v$current_version"
+        fi
+    else
+        echo -e "\n${PINK}${B}✨ UPDATING SLAY ✨${R}\n"
+        echo "Fetching latest..."
+
+        git -C "$SCRIPT_DIR" fetch origin master 2>/dev/null
+
+        local local_hash remote_hash
+        local_hash=$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null)
+        remote_hash=$(git -C "$SCRIPT_DIR" rev-parse origin/master 2>/dev/null)
+
+        if [ "$local_hash" = "$remote_hash" ]; then
+            echo -e "${GREEN}Already on the latest version!${R}"
+            echo "Current: v$current_version"
+            exit 0
+        fi
+
+        echo "Pulling updates..."
+        git -C "$SCRIPT_DIR" pull origin master 2>/dev/null
+
+        local new_version
+        new_version=$(grep '^VERSION=' "$SCRIPT_DIR/slay" 2>/dev/null | cut -d'"' -f2)
+
+        echo -e "\n${GREEN}${B}Updated!${R}"
+        if [ "$new_version" != "$current_version" ]; then
+            echo "v$current_version → v$new_version"
+        fi
+    fi
+
+    exit 0
+}
+
+# ═══════════════════════════════════════════════════════════════
+# ARGUMENT PARSING
+# ═══════════════════════════════════════════════════════════════
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -i|--interval)
+            INTERVAL="$2"
+            shift 2
+            ;;
+        -h|--help)
+            show_help
+            ;;
+        -v|--version)
+            echo "slay v$VERSION"
+            exit 0
+            ;;
+        -r|--refresh)
+            REFRESH_CACHE=true
+            shift
+            ;;
+        --test-deps)
+            TEST_DEPS_MODE=true
+            check_dependencies
+            ;;
+        update)
+            do_update
+            ;;
+        -*)
+            echo "Unknown flag: $1 (try -h for help, gorgeous)"
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Run dependency check (unless --test-deps already ran it)
+check_dependencies
+
+URL="$1"
+TARGET_VERSION="$2"
+CUSTOM_MESSAGE="$3"
+
+# Check args - will run main logic after all functions are defined
+if [ -z "$URL" ]; then
+    INTERACTIVE_MODE=true
+elif [ -z "$TARGET_VERSION" ]; then
+    show_help
+fi
+
+# Default message if not provided
+if [ -z "$CUSTOM_MESSAGE" ]; then
+    CUSTOM_MESSAGE="$URL deployed v$TARGET_VERSION"
+fi
+
+# ═══════════════════════════════════════════════════════════════
+# MAIN EXECUTION
+# ═══════════════════════════════════════════════════════════════
+
+if [ "$INTERACTIVE_MODE" = true ]; then
+    # Interactive mode - project picker with return-on-cancel
+    while true; do
+        WATCH_CANCELLED=false
+        START_TIME="$(date +%s)"  # Reset timer for each watch session
+        select_project
+
+        run_watch_loop
+
+        # If watch completed (not cancelled), exit
+        if [ "$WATCH_CANCELLED" = false ]; then
+            exit 0
+        fi
+
+        # Otherwise, loop back to project picker
+        echo ""
+        gum style --foreground 214 "Watch cancelled, returning to project picker..."
+        sleep 0.5
+    done
+else
+    # Direct mode - just run the watch loop
+    run_watch_loop
+fi
