@@ -226,68 +226,76 @@ do_update() {
         echo ""
 
         gum spin --spinner "$(random_spinner)" --spinner.foreground="212" --title "Fetching latest tea from GitHub..." -- \
-            git -C "$SCRIPT_DIR" fetch origin master 2>/dev/null
+            git -C "$SCRIPT_DIR" fetch origin --tags 2>/dev/null
 
-        # Check if we're behind
-        local local_hash remote_hash
-        local_hash=$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null)
-        remote_hash=$(git -C "$SCRIPT_DIR" rev-parse origin/master 2>/dev/null)
+        # Get latest tag (version sorted)
+        local latest_tag
+        latest_tag=$(git -C "$SCRIPT_DIR" tag -l 'v*' | sort -V | tail -1)
 
-        if [ "$local_hash" = "$remote_hash" ]; then
-            gum style --foreground 82 "Already on the latest version, queen! ✨"
-            gum style --foreground 250 "Current: v$current_version"
+        if [ -z "$latest_tag" ]; then
+            gum style --foreground 214 "No tags found - falling back to master"
+            git -C "$SCRIPT_DIR" pull origin master 2>/dev/null
             exit 0
         fi
 
-        # Show what's coming
+        # Check if we're already on the latest tag
+        local current_tag
+        current_tag=$(git -C "$SCRIPT_DIR" describe --tags --exact-match 2>/dev/null || echo "")
+
+        if [ "$current_tag" = "$latest_tag" ]; then
+            gum style --foreground 82 "Already on the latest version, queen! ✨"
+            gum style --foreground 250 "Current: $latest_tag"
+            exit 0
+        fi
+
+        # Show what version we're updating to
         echo ""
-        gum style --foreground 250 "New commits incoming:"
-        git -C "$SCRIPT_DIR" log --oneline HEAD..origin/master 2>/dev/null | head -5 | while read -r line; do
-            gum style --foreground 51 "  • $line"
-        done
+        gum style --foreground 250 "New version available: $(gum style --foreground 82 --bold "$latest_tag")"
+        if [ -n "$current_tag" ]; then
+            gum style --foreground 250 "Current: $current_tag"
+        else
+            gum style --foreground 250 "Current: v$current_version (untagged)"
+        fi
         echo ""
 
-        # Pull the changes
-        gum spin --spinner "$(random_spinner)" --spinner.foreground="212" --title "Pulling updates..." -- \
-            git -C "$SCRIPT_DIR" pull origin master 2>/dev/null
-
-        # Get new version
-        local new_version
-        new_version=$(grep '^VERSION=' "$SCRIPT_DIR/slay" 2>/dev/null | cut -d'"' -f2)
+        # Checkout the latest tag
+        gum spin --spinner "$(random_spinner)" --spinner.foreground="212" --title "Upgrading to $latest_tag..." -- \
+            git -C "$SCRIPT_DIR" checkout "$latest_tag" 2>/dev/null
 
         echo ""
         gum style --foreground 82 --bold "Glow up complete! 💅"
-        if [ "$new_version" != "$current_version" ]; then
-            gum style --foreground 250 "Updated: v$current_version → v$new_version"
-        else
-            gum style --foreground 250 "Version: v$current_version"
-        fi
+        gum style --foreground 250 "Now on: $latest_tag"
     else
         echo -e "\n${PINK}${B}✨ UPDATING SLAY ✨${R}\n"
         echo "Fetching latest..."
 
-        git -C "$SCRIPT_DIR" fetch origin master 2>/dev/null
+        git -C "$SCRIPT_DIR" fetch origin --tags 2>/dev/null
 
-        local local_hash remote_hash
-        local_hash=$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null)
-        remote_hash=$(git -C "$SCRIPT_DIR" rev-parse origin/master 2>/dev/null)
+        # Get latest tag (version sorted)
+        local latest_tag
+        latest_tag=$(git -C "$SCRIPT_DIR" tag -l 'v*' | sort -V | tail -1)
 
-        if [ "$local_hash" = "$remote_hash" ]; then
-            echo -e "${GREEN}Already on the latest version!${R}"
-            echo "Current: v$current_version"
+        if [ -z "$latest_tag" ]; then
+            echo "No tags found - falling back to master"
+            git -C "$SCRIPT_DIR" pull origin master 2>/dev/null
             exit 0
         fi
 
-        echo "Pulling updates..."
-        git -C "$SCRIPT_DIR" pull origin master 2>/dev/null
+        # Check if we're already on the latest tag
+        local current_tag
+        current_tag=$(git -C "$SCRIPT_DIR" describe --tags --exact-match 2>/dev/null || echo "")
 
-        local new_version
-        new_version=$(grep '^VERSION=' "$SCRIPT_DIR/slay" 2>/dev/null | cut -d'"' -f2)
+        if [ "$current_tag" = "$latest_tag" ]; then
+            echo -e "${GREEN}Already on the latest version!${R}"
+            echo "Current: $latest_tag"
+            exit 0
+        fi
+
+        echo "Upgrading to $latest_tag..."
+        git -C "$SCRIPT_DIR" checkout "$latest_tag" 2>/dev/null
 
         echo -e "\n${GREEN}${B}Updated!${R}"
-        if [ "$new_version" != "$current_version" ]; then
-            echo "v$current_version → v$new_version"
-        fi
+        echo "Now on: $latest_tag"
     fi
 
     exit 0
