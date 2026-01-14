@@ -71,14 +71,14 @@ if [ ${#missing[@]} -gt 0 ]; then
     echo ""
     echo "Install them first:"
 
-    local pkg_mgr=$(detect_package_manager)
+    pkg_mgr=$(detect_package_manager)
     case "$pkg_mgr" in
         brew)
             echo -e "  ${B}brew install ${missing[*]}${R}"
             ;;
         apt)
             # Special case: fd is fd-find on Debian/Ubuntu
-            local apt_deps=()
+            apt_deps=()
             for dep in "${missing[@]}"; do
                 if [ "$dep" = "fd" ]; then
                     apt_deps+=("fd-find")
@@ -90,7 +90,7 @@ if [ ${#missing[@]} -gt 0 ]; then
             ;;
         dnf|yum)
             # fd is fd-find on RHEL/Fedora too
-            local rpm_deps=()
+            rpm_deps=()
             for dep in "${missing[@]}"; do
                 if [ "$dep" = "fd" ]; then
                     rpm_deps+=("fd-find")
@@ -108,7 +108,7 @@ if [ ${#missing[@]} -gt 0 ]; then
             echo -e "  ${B}brew install ${missing[*]}${R}  (macOS)"
 
             # Build apt command with fd-find special case
-            local apt_deps=()
+            apt_deps=()
             for dep in "${missing[@]}"; do
                 [ "$dep" = "fd" ] && apt_deps+=("fd-find") || apt_deps+=("$dep")
             done
