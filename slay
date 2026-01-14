@@ -226,7 +226,7 @@ do_update() {
         echo ""
 
         gum spin --spinner "$(random_spinner)" --spinner.foreground="212" --title "Fetching latest tea from GitHub..." -- \
-            git -C "$SCRIPT_DIR" fetch origin --tags 2>/dev/null
+            git -C "$SCRIPT_DIR" fetch origin '+refs/tags/*:refs/tags/*' 2>/dev/null
 
         # Get latest tag (version sorted)
         local latest_tag
@@ -269,7 +269,7 @@ do_update() {
         echo -e "\n${PINK}${B}✨ UPDATING SLAY ✨${R}\n"
         echo "Fetching latest..."
 
-        git -C "$SCRIPT_DIR" fetch origin --tags 2>/dev/null
+        git -C "$SCRIPT_DIR" fetch origin '+refs/tags/*:refs/tags/*' 2>/dev/null
 
         # Get latest tag (version sorted)
         local latest_tag
