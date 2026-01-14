@@ -55,13 +55,13 @@ PUSHOVER_TOKEN="your-api-token"
 
 ```bash
 # Install slay (stable)
-curl -fsSL https://raw.githubusercontent.com/dblumenau/werkroom/v1.0.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dblumenau/werkroom/v1.0.4/install.sh | bash
 
 # Install specific tools
-curl -fsSL https://raw.githubusercontent.com/dblumenau/werkroom/v1.0.0/install.sh | bash -s -- slay hunty
+curl -fsSL https://raw.githubusercontent.com/dblumenau/werkroom/v1.0.4/install.sh | bash -s -- slay hunty
 
 # Install everything
-curl -fsSL https://raw.githubusercontent.com/dblumenau/werkroom/v1.0.0/install.sh | bash -s -- --all
+curl -fsSL https://raw.githubusercontent.com/dblumenau/werkroom/v1.0.4/install.sh | bash -s -- --all
 
 # Bleeding edge (master branch)
 curl -fsSL https://raw.githubusercontent.com/dblumenau/werkroom/master/install.sh | bash
@@ -102,7 +102,7 @@ slay update
 ### Versions
 
 The installer uses semantic versioning:
-- **v1.0.0** (current stable) - Recommended for production use
+- **v1.0.4** (current stable) - Recommended for production use
 - **master** - Latest development version with newest features
 
 Check [releases](https://github.com/dblumenau/werkroom/releases) for version history.
