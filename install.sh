@@ -59,7 +59,7 @@ missing=()
 if ! command -v gum &> /dev/null; then
     missing+=("gum")
 fi
-if ! command -v fd &> /dev/null; then
+if ! command -v fd &>/dev/null && ! command -v fdfind &>/dev/null; then
     missing+=("fd")
 fi
 if ! command -v git &> /dev/null; then
