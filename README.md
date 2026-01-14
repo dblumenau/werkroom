@@ -5,16 +5,17 @@ CLI tools that serve. Built with [gum](https://github.com/charmbracelet/gum) and
 ## Tools
 
 ### slay
-Interactive project runner for Laravel/Node projects. Handles:
-- Git sync, composer/npm install, builds
-- Artisan commands, queue workers, schedulers
-- Watch mode with file monitoring
-- Editor integration (Cursor, PHPStorm, VS Code)
+Project task runner and deployment watcher with dramatic personality. Features:
+- Watch health endpoints for version deployments (with flicker protection)
+- Git sync-to-master workflow (stash, switch, pull)
+- Run composer install / npm install + build
+- Run artisan schedule:run
+- Open in VSCode or PhpStorm
 
 ```bash
-slay              # Interactive mode
-slay -w           # Watch mode
-slay myproject    # Jump straight to a project
+slay                          # Interactive mode
+slay <url> <version>          # Watch for specific version
+slay -i 10 <url> <version>    # Custom polling interval (seconds)
 ```
 
 ### hunty
