@@ -139,13 +139,13 @@ run_schedule_command() {
     gum style --foreground 250 --italic "You'll get a ping when she's done 💅"
     echo ""
 
-    # Run in background: source envrc, run schedule, then notify
+    # Run in background: source envrc, run schedule, then notify (if available)
     # Redirect all output to /dev/null so it doesn't pollute the UI
     (
         cd "$selected_service_path" && \
         source .envrc 2>/dev/null && \
         php artisan schedule:run && \
-        ~/.claude/bin/notify-watch "Schedule complete: $project_name" "Slay"
+        command -v notify-watch &>/dev/null && notify-watch "Schedule complete: $project_name" "Slay"
     ) > /dev/null 2>&1 &
 
     gum style --foreground 82 "✓ Kicked off! You can close this or keep slaying."

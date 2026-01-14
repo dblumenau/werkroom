@@ -198,7 +198,12 @@ select_project() {
                         state="choose_action"
                         ;;
                     "Open in PhpStorm")
-                        run_editor_scope "$selected_customer" "open -a PhpStorm" "PhpStorm"
+                        # macOS uses 'open -a', Linux uses direct command
+                        if [[ "$OSTYPE" == darwin* ]]; then
+                            run_editor_scope "$selected_customer" "open -a PhpStorm" "PhpStorm"
+                        else
+                            run_editor_scope "$selected_customer" "phpstorm" "PhpStorm"
+                        fi
                         state="choose_action"
                         ;;
                     "Composer install")

@@ -683,9 +683,9 @@ do_search() {
         local msg_count
         msg_count=$(wc -l < "$file" 2>/dev/null | tr -d ' ')
 
-        # Get last modified time
+        # Get last modified time (macOS: stat -f, Linux: stat -c)
         local last_mod
-        last_mod=$(stat -f "%Sm" -t "%m-%d %H:%M" "$file" 2>/dev/null)
+        last_mod=$(stat -f "%Sm" -t "%m-%d %H:%M" "$file" 2>/dev/null || stat -c "%y" "$file" 2>/dev/null | cut -d' ' -f1-2 | cut -c6-)
 
         # Format display line with fixed widths
         local display_line
@@ -972,7 +972,19 @@ show_result_actions() {
             ;;
         "Copy session ID")
             if [ -n "$session_id" ]; then
-                echo "$session_id" | pbcopy 2>/dev/null || echo "$session_id" | xclip -selection clipboard 2>/dev/null
+                # Try clipboard tools: pbcopy (macOS), xclip, xsel (Linux)
+                if command -v pbcopy &>/dev/null; then
+                    echo "$session_id" | pbcopy
+                elif command -v xclip &>/dev/null; then
+                    echo "$session_id" | xclip -selection clipboard
+                elif command -v xsel &>/dev/null; then
+                    echo "$session_id" | xsel --clipboard --input
+                else
+                    gum style --foreground "$COLOR_WARNING" "No clipboard tool found (install xclip or xsel)"
+                    gum style --foreground "$COLOR_INFO" "Session ID: $session_id"
+                    sleep 2
+                    return 0
+                fi
                 gum style --foreground "$COLOR_SUCCESS" "Session ID copied: $session_id"
             else
                 gum style --foreground "$COLOR_ERROR" "No session ID found"

@@ -3,10 +3,22 @@
 
 # Requires globals: PROJECTS_DIR, CACHE_FILE, REFRESH_CACHE, HAS_GUM
 
+# fd command wrapper - handles fd vs fdfind (Debian/Ubuntu)
+fd_cmd() {
+    if command -v fd &>/dev/null; then
+        fd "$@"
+    elif command -v fdfind &>/dev/null; then
+        fdfind "$@"
+    else
+        echo "fd not installed - run: brew install fd (or apt install fd-find)" >&2
+        return 1
+    fi
+}
+
 build_project_cache() {
     # Find all git repositories in the projects directory
-    if ! command -v fd &> /dev/null; then
-        echo "fd not installed - run: brew install fd" >&2
+    if ! command -v fd &>/dev/null && ! command -v fdfind &>/dev/null; then
+        echo "fd not installed - run: brew install fd (or apt install fd-find)" >&2
         exit 1
     fi
 
@@ -14,7 +26,7 @@ build_project_cache() {
     mkdir -p "$(dirname "$CACHE_FILE")"
 
     # Find all .git directories and extract project paths
-    fd -t d "^\.git$" "$PROJECTS_DIR" --hidden -E backup_projects 2>/dev/null | \
+    fd_cmd -t d "^\.git$" "$PROJECTS_DIR" --hidden -E backup_projects 2>/dev/null | \
         sed 's|/\.git/?$||' | \
         sort -u > "$CACHE_FILE"
 }
@@ -56,7 +68,7 @@ get_repos_for_group() {
 get_git_repos_for_customer() {
     local customer="$1"
     # Find all git repos under customer folder
-    fd -t d "^\.git$" "$PROJECTS_DIR/$customer" --hidden 2>/dev/null | \
+    fd_cmd -t d "^\.git$" "$PROJECTS_DIR/$customer" --hidden 2>/dev/null | \
         sed -E 's|/\.git/?$||' | \
         sed "s|$PROJECTS_DIR/$customer/||" | \
         sort
@@ -65,7 +77,7 @@ get_git_repos_for_customer() {
 get_npm_projects_for_customer() {
     local customer="$1"
     # Find all projects with package.json (for npm install)
-    fd -t f "^package\.json$" "$PROJECTS_DIR/$customer" --hidden 2>/dev/null | \
+    fd_cmd -t f "^package\.json$" "$PROJECTS_DIR/$customer" --hidden 2>/dev/null | \
         sed 's|/package\.json$||' | \
         sed "s|$PROJECTS_DIR/$customer/||" | \
         sort
@@ -74,7 +86,7 @@ get_npm_projects_for_customer() {
 get_composer_projects_for_customer() {
     local customer="$1"
     # Find all projects with composer.json (for composer install)
-    fd -t f "^composer\.json$" "$PROJECTS_DIR/$customer" --hidden 2>/dev/null | \
+    fd_cmd -t f "^composer\.json$" "$PROJECTS_DIR/$customer" --hidden 2>/dev/null | \
         sed 's|/composer\.json$||' | \
         sed "s|$PROJECTS_DIR/$customer/||" | \
         sort
@@ -83,7 +95,7 @@ get_composer_projects_for_customer() {
 get_artisan_projects_for_customer() {
     local customer="$1"
     # Find all Laravel projects with artisan file (for schedule:run)
-    fd -t f "^artisan$" "$PROJECTS_DIR/$customer" --hidden 2>/dev/null | \
+    fd_cmd -t f "^artisan$" "$PROJECTS_DIR/$customer" --hidden 2>/dev/null | \
         sed 's|/artisan$||' | \
         sed "s|$PROJECTS_DIR/$customer/||" | \
         sort

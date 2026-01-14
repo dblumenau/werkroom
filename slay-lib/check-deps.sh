@@ -20,7 +20,7 @@ check_dependencies() {
             missing+=("gum")
             install_cmds+=("  brew install gum  OR  apt install gum")
         fi
-        if ! command -v fd &> /dev/null; then
+        if ! command -v fd &>/dev/null && ! command -v fdfind &>/dev/null; then
             missing+=("fd")
             install_cmds+=("  brew install fd   OR  apt install fd-find")
         fi
