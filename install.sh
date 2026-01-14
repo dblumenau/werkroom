@@ -163,8 +163,8 @@ echo ""
 # Check if ~/bin is in PATH
 if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
     # Detect shell and suggest appropriate config file
-    local shell_config
-    local shell_name
+    shell_config=""
+    shell_name=""
     if [ -n "$ZSH_VERSION" ]; then
         shell_config="~/.zshrc"
         shell_name="zsh"
