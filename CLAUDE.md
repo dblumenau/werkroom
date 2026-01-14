@@ -15,7 +15,7 @@ werkroom is a collection of CLI tools built with [gum](https://github.com/charmb
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dblumenau/werkroom/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dblumenau/werkroom/v1.0.0/install.sh | bash
 ```
 
 ## Dependencies
