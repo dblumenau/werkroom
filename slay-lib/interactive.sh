@@ -278,38 +278,61 @@ select_project() {
                     gum style --foreground 250 "Found $url_count endpoints for $selected_customer:"
                     echo ""
 
-                    # Build list with friendly names (extract subdomain from URL)
-                    local url_list=""
+                    # Build table data (no header - gum table adds it via --columns)
+                    local table_data=""
                     while IFS= read -r url; do
                         [ -z "$url" ] && continue
-                        # Extract meaningful name from URL (e.g., myapp-staging from https://myapp-staging.example.com/healthz)
-                        local friendly_name
-                        friendly_name=$(echo "$url" | sed 's|https\?://||' | cut -d'.' -f1)
-                        url_list+="${friendly_name}|${url}"$'\n'
+                        # Extract service name from URL subdomain
+                        local subdomain env_type
+                        subdomain=$(echo "$url" | sed -E 's|https?://||' | cut -d'.' -f1)
+
+                        # Determine environment from subdomain
+                        if echo "$subdomain" | grep -qE '[-]staging$'; then
+                            env_type="staging"
+                            subdomain=$(echo "$subdomain" | sed 's/-staging$//')
+                        elif echo "$subdomain" | grep -qE '[-]test$'; then
+                            env_type="test"
+                            subdomain=$(echo "$subdomain" | sed 's/-test$//')
+                        elif echo "$subdomain" | grep -qE '[-]experiments$'; then
+                            env_type="experiments"
+                            subdomain=$(echo "$subdomain" | sed 's/-experiments$//')
+                        else
+                            env_type="prod"
+                        fi
+
+                        table_data+="${subdomain},${env_type},${url}"$'\n'
                     done <<< "$discovered_urls"
 
-                    # Add options
-                    url_list+="Enter different URL|__MANUAL__"$'\n'
-                    url_list+="← Back|__BACK__"
+                    # Add action rows (clean display, no ugly placeholders)
+                    table_data+="Enter different URL,—,—"$'\n'
+                    table_data+="← Back,—,—"
 
-                    local filter_height=$(( $(tput lines) - 10 ))
-                    [ "$filter_height" -lt 10 ] && filter_height=10
+                    local table_height=$(( $(tput lines) - 12 ))
+                    [ "$table_height" -lt 8 ] && table_height=8
 
-                    local selected_entry
-                    selected_entry=$(echo "$url_list" | cut -d'|' -f1 | gum filter --placeholder "Search endpoints..." --indicator.foreground="212" --match.foreground="212" --height="$filter_height")
+                    # Return full row, then parse - allows clean URL display for action rows
+                    local selected_row selected_service selected_url
+                    selected_row=$(echo "$table_data" | gum table \
+                        --columns "Service,Env,URL" \
+                        --height "$table_height" \
+                        --border "rounded" \
+                        --border.foreground "212" \
+                        --selected.foreground "212")
 
-                    if [ -z "$selected_entry" ] || [ "$selected_entry" = "← Back" ]; then
+                    # Parse service name (first column) for action detection
+                    selected_service=$(echo "$selected_row" | cut -d',' -f1)
+                    selected_url=$(echo "$selected_row" | cut -d',' -f3)
+
+                    if [ -z "$selected_row" ] || [ "$selected_service" = "← Back" ]; then
                         state="choose_action"
                         continue
                     fi
 
-                    if [ "$selected_entry" = "Enter different URL" ]; then
+                    if [ "$selected_service" = "Enter different URL" ]; then
                         # Fall through to manual URL input below
                         :
                     else
-                        # Find the URL for the selected entry
-                        discovered_url=$(echo "$url_list" | grep "^${selected_entry}|" | cut -d'|' -f2)
-                        URL="$discovered_url"
+                        URL="$selected_url"
                         save_url_to_cache "$selected_customer" "$URL"
                         state="fetch_version"
                         continue
@@ -467,7 +490,7 @@ select_project() {
                 echo ""
                 # Extract hostname from URL for display
                 local display_name
-                display_name=$(echo "$URL" | sed 's|https\?://||' | cut -d'/' -f1)
+                display_name=$(echo "$URL" | sed -E 's|https?://||' | cut -d'/' -f1)
 
                 gum style --foreground 82 "Selected: $display_name"
                 echo ""
@@ -504,7 +527,7 @@ select_project() {
 
                 # Extract hostname for message
                 local display_name
-                display_name=$(echo "$URL" | sed 's|https\?://||' | cut -d'/' -f1)
+                display_name=$(echo "$URL" | sed -E 's|https?://||' | cut -d'/' -f1)
 
                 if [[ "$watch_mode" == "When version changes"* ]]; then
                     TARGET_VERSION="__ANY_CHANGE__"
@@ -543,7 +566,7 @@ select_project() {
                 # We'll treat empty as "skip" and move forward
                 if [ -z "$CUSTOM_MESSAGE" ]; then
                     local display_name
-                    display_name=$(echo "$URL" | sed 's|https\?://||' | cut -d'/' -f1)
+                    display_name=$(echo "$URL" | sed -E 's|https?://||' | cut -d'/' -f1)
                     CUSTOM_MESSAGE="$display_name deployed v$TARGET_VERSION"
                 fi
 
