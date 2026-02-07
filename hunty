@@ -330,6 +330,10 @@ decode_project_path() {
     [[ -z "$encoded" ]] && { echo "$base"; return; }
     [[ "$encoded" == "subagents" ]] && { echo "subagents"; return; }
 
+    # Double dashes encode dotfiles/dotfolders (-- means /.)
+    # Replace -- with -. so the dot stays attached to the next segment after splitting
+    encoded="${encoded//--/-.}"
+
     # Split by dash and reconstruct path by checking filesystem
     local IFS='-'
     local parts
