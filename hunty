@@ -456,7 +456,7 @@ restore_and_show_picker() {
                 msg_type=$(echo "$jsonline" | jq -r ".type // empty" 2>/dev/null)
                 case "$msg_type" in
                     user)
-                        content=$(echo "$jsonline" | jq -r ".message.content // empty" 2>/dev/null)
+                        content=$(echo "$jsonline" | jq -r "if (.message.content | type) == \"string\" then .message.content elif (.message.content | type) == \"array\" then ([.message.content[]? | (.content // .text // \"\") | if type == \"string\" then . else \"\" end] | join(\" \") | .[:2000]) else empty end" 2>/dev/null)
                         if [ -n "$content" ] && [ "$content" != "null" ]; then
                             printf "\033[96m━━━ 👤 USER ━━━\033[0m\n%s\n\n" "$(echo "$content" | head -c 2000)"
                         fi
@@ -540,7 +540,13 @@ parse_message() {
 
     case "$msg_type" in
         user)
-            msg_content=$(echo "$line" | jq -r '.message.content // empty' 2>/dev/null)
+            msg_content=$(echo "$line" | jq -r '
+                if (.message.content | type) == "string" then .message.content
+                elif (.message.content | type) == "array" then
+                    [.message.content[]? | (.content // .text // "") | if type == "string" then . else "" end] | join(" ") | .[:500]
+                else empty
+                end
+            ' 2>/dev/null)
             if [ -n "$msg_content" ]; then
                 echo "👤 $msg_content"
             fi
@@ -657,7 +663,13 @@ do_search() {
         local parsed_content
         parsed_content=$(sed -n "${line_num}p" "$file" 2>/dev/null | jq -r '
             if .type == "user" then
-                "👤 " + (.message.content // "")
+                if (.message.content | type) == "string" then
+                    "👤 " + .message.content
+                elif (.message.content | type) == "array" then
+                    "👤 " + ([.message.content[]? | (.content // .text // "") | if type == "string" then . else "" end] | join(" ") | .[:500])
+                else
+                    ""
+                end
             elif .type == "assistant" then
                 "🤖 " + ((.message.content[]? | select(.type == "text") | .text) // "")
             else
@@ -738,7 +750,7 @@ do_search() {
                 msg_type=$(echo "$jsonline" | jq -r ".type // empty" 2>/dev/null)
                 case "$msg_type" in
                     user)
-                        content=$(echo "$jsonline" | jq -r ".message.content // empty" 2>/dev/null)
+                        content=$(echo "$jsonline" | jq -r "if (.message.content | type) == \"string\" then .message.content elif (.message.content | type) == \"array\" then ([.message.content[]? | (.content // .text // \"\") | if type == \"string\" then . else \"\" end] | join(\" \") | .[:2000]) else empty end" 2>/dev/null)
                         if [ -n "$content" ] && [ "$content" != "null" ]; then
                             printf "\033[96m━━━ 👤 USER ━━━\033[0m\n%s\n\n" "$(echo "$content" | head -c 2000)"
                         fi
@@ -802,7 +814,11 @@ view_full_session() {
     local file="$1"
     # Parse all messages and format for reading
     jq -r 'select(.type == "user" or .type == "assistant") |
-        if .type == "user" then "\n👤 USER:\n" + .message.content
+        if .type == "user" then
+            if (.message.content | type) == "string" then "\n👤 USER:\n" + .message.content
+            elif (.message.content | type) == "array" then "\n👤 USER:\n" + ([.message.content[]? | (.content // .text // "") | if type == "string" then . else "" end] | join("\n"))
+            else ""
+            end
         elif .type == "assistant" then "\n🤖 CLAUDE:\n" + ((.message.content[]? | select(.type == "text") | .text) // "")
         else ""
         end' "$file" 2>/dev/null | bat --style=plain --paging=always 2>/dev/null || less
@@ -941,7 +957,7 @@ show_result_actions() {
 
         case "$msg_type" in
             user)
-                content=$(echo "$line" | jq -r '.message.content // empty' 2>/dev/null | head -c 200)
+                content=$(echo "$line" | jq -r 'if (.message.content | type) == "string" then .message.content elif (.message.content | type) == "array" then ([.message.content[]? | (.content // .text // "") | if type == "string" then . else "" end] | join(" ") | .[:500]) else empty end' 2>/dev/null | head -c 200)
                 [ -n "$content" ] && gum style --foreground "$COLOR_INFO" "👤 ${content}..."
                 ;;
             assistant)
