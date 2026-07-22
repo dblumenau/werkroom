@@ -11,9 +11,9 @@ check_timeout() {
     if [ "$ELAPSED" -ge "$TIMEOUT_SECONDS" ]; then
         echo ""
         if [ "$HAS_GUM" = true ]; then
-            slay_error "TIMEOUT - 10 minutes elapsed, exiting to prevent zombie 💀"
+            slay_error "TIMEOUT - 20 minutes elapsed, exiting to prevent zombie 💀"
         else
-            echo -e "${RED}${B}TIMEOUT${R} - 10 minutes elapsed, exiting to prevent zombie 💀"
+            echo -e "${RED}${B}TIMEOUT${R} - 20 minutes elapsed, exiting to prevent zombie 💀"
         fi
         exit 1
     fi

@@ -40,7 +40,7 @@ slay uses a state machine architecture with modular library files:
 | `interactive.sh` | State machine for project picker (`select_customer` → `choose_action` → action-specific states) |
 | `actions.sh` | Action handlers: editor scope picker, schedule runner, composer/npm commands |
 | `git-sync.sh` | Git sync-to-master workflow (stash, switch branch, pull) |
-| `watch-loop.sh` | Core polling loop with timeout (10min), version verification (3s delay to avoid flicker) |
+| `watch-loop.sh` | Core polling loop with timeout (20min), version verification (3s delay to avoid flicker) |
 | `check-deps.sh` | Dependency validation with sassy error messages |
 
 ### State Machine Flow
