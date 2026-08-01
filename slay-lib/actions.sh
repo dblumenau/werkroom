@@ -145,7 +145,7 @@ run_schedule_command() {
         cd "$selected_service_path" && \
         source .envrc 2>/dev/null && \
         php artisan schedule:run && \
-        command -v notify-watch &>/dev/null && notify-watch "Schedule complete: $project_name" "Slay"
+        command -v notify-watch &>/dev/null && notify-watch -n "Schedule complete: $project_name" "Slay"
     ) > /dev/null 2>&1 &
 
     gum style --foreground 82 "✓ Kicked off! You can close this or keep slaying."

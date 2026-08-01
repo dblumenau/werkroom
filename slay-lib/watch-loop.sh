@@ -182,7 +182,7 @@ run_watch_loop() {
                         celebrate
                         # Send notification if notify-watch is available (optional for WSL compatibility)
                         if command -v notify-watch &> /dev/null; then
-                            notify-watch -e "$CUSTOM_MESSAGE" "Deployed"
+                            notify-watch -h "$CUSTOM_MESSAGE" "Deployed"
                         fi
                         return 0
                     else
